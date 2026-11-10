@@ -364,3 +364,11 @@ td.is-small { color: var(--muted); }
 .chev { color: var(--muted); font-size: 1.4rem; }
 .about { display: flex; align-items: center; gap: 20px; margin-top: 8px; }
 .about .muted { margin-left: auto; font-size: .85rem; }
+
+/* ---------- share + backup nudge ---------- */
+.share-btn { min-width: 44px; text-align: right; }
+.nudge { display: grid; gap: 10px; margin-top: 12px; padding: 14px 16px; border-radius: 16px; background: var(--fill); }
+.nudge > span:first-child { display: grid; gap: 2px; }
+.nudge small { color: var(--text-2); font-size: .85rem; }
+.nudge-actions { display: flex; justify-content: flex-end; align-items: center; gap: 16px; }
+.nudge .btn { min-height: 44px; }

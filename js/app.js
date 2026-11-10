@@ -7,6 +7,7 @@ import {
   defaultZoneForLoc, locName, toCSV,
 } from './stats.js';
 import { fieldSVG, pointToField } from './field.js';
+import { renderSummary, shareOrDownload } from './share.js';
 
 let db = store.load();
 let installPrompt = null; // Android/desktop "install app" event
@@ -56,20 +57,30 @@ function showToast(msg, ms = 2400) {
     document.getElementById('toast')?.classList.remove('show');
   }, ms);
 }
-function download(name, text, type) {
-  const blob = new Blob([text], { type });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+const saveFile = (name, text, type) => shareOrDownload(new Blob([text], { type }), name, CONFIG.appName);
+
+// ---------- backups ----------
+const BACKUP_EVERY = 3; // games logged since the last backup before we suggest one
+const loggedGames = () => db.games.filter((g) => g.events.length).length;
+function backupDue() {
+  const n = loggedGames();
+  const since = n - (db.prefs.backupGames || 0);
+  return since >= BACKUP_EVERY && n > (db.prefs.backupSnoozeAt || 0);
+}
+async function doBackup() {
+  const ok = await saveFile(`at-bat-log-backup-${today()}.json`, JSON.stringify(db, null, 1), 'application/json');
+  if (!ok) return;
+  db.prefs.backupGames = loggedGames();
+  db.prefs.backupAt = Date.now();
+  persist();
+  showToast('Backup saved');
+  render();
 }
 function describePA(pa) {
   if (pa.result === 'K') return pa.kLooking ? 'Strikeout looking' : 'Strikeout swinging';
   return PA_RESULTS[pa.result] || pa.result;
 }
-const backHeader = (title, href = '#/') => `<header class="top"><a class="icon-btn" href="${href}" aria-label="Back">‹</a><h1>${title}</h1><span class="spacer"></span></header>`;
+const backHeader = (title, href = '#/', right = '<span class="spacer"></span>') => `<header class="top"><a class="icon-btn" href="${href}" aria-label="Back">‹</a><h1>${title}</h1>${right}</header>`;
 
 // ---------- routing ----------
 function route() {
@@ -158,6 +169,8 @@ function viewHome() {
     <header class="top"><h1>${esc(CONFIG.appName)}</h1><a class="icon-btn" href="#/settings" aria-label="Settings">⚙</a></header>
     ${seasonCard()}
     <a class="btn primary huge" href="#/new">New game</a>
+    ${backupDue() ? `<section class="nudge"><span><b>Back up your season</b><small>${loggedGames() - (db.prefs.backupGames || 0)} games since your last backup. They only live on this phone.</small></span>
+      <span class="nudge-actions"><button class="link" data-act="backup-later">Later</button><button class="btn primary" data-act="backup">Save backup</button></span></section>` : ''}
     <h2 class="section">Games</h2>
     <ul class="list">${list}</ul>
   </main>`;
@@ -329,7 +342,8 @@ function viewReport() {
   const isPro = pro.isPro();
   const deep = !!single || isPro; // game reports are always complete; the season deep-dive is Pro
 
-  const header = backHeader(single ? 'Game report' : 'Season report', single ? `#/game/${single.id}` : '#/');
+  const canShare = rep.pitchCount > 0;
+  const header = backHeader(single ? 'Game report' : 'Season report', single ? `#/game/${single.id}` : '#/', canShare ? '<button class="link share-btn" data-act="share-report">Share</button>' : '<span class="spacer"></span>');
   if (!rep.pitchCount && !rep.allPAs.length) {
     return `<main class="page report">${header}${filters}<p class="empty">Nothing logged for this selection yet.</p></main>`;
   }
@@ -428,6 +442,30 @@ function viewTrends(games) {
   if (!rows) return '';
   return `<h2 class="section">Trends, game by game</h2><div class="stats">${rows}</div>
     <p class="hint">Single games bounce around a lot. Look for the direction over several games.</p>`;
+}
+
+async function shareReport() {
+  const f = ui.report;
+  const games = filteredGames();
+  const rep = buildReport(games);
+  const single = f.game !== 'all' ? getGame(f.game) : null;
+  const S = rep.stats, sl = rep.slash;
+  const names = [...new Set(games.map((g) => g.player).filter(Boolean))];
+  const who = names.length === 1 ? names[0] : 'Season';
+  const stat = (label, m) => ({ label, value: pct(m.value), sub: m.den ? `${m.num} of ${m.den}` : 'no data', small: m.small });
+  const canvas = renderSummary({
+    title: single ? `${single.player || 'Batter'} vs ${single.opponent || 'Opponent'}` : `${who}${f.season !== 'all' ? ` · ${f.season} season` : ''}`,
+    subtitle: single ? fmtDate(single.date) : `${games.length} game${games.length === 1 ? '' : 's'} · ${rep.paCount} PA · ${rep.pitchCount} pitches`,
+    headline: single ? (gameLine(rep.allPAs) || `${rep.pitchCount} pitches`) : `${rate3(sl.avg)} / ${rate3(sl.obp)} / ${rate3(sl.slg)}`,
+    headlineLabel: single ? `${rep.paCount} PA · ${rep.pitchCount} pitches seen` : 'AVG / OBP / SLG',
+    stats: [stat('Chase rate', S.chase), stat('Zone swing', S.zoneSwing), stat('Whiff rate', S.whiff), stat('Hard-hit rate', S.hardHit)],
+    spray: rep.spray,
+    footer: `Made with ${CONFIG.appName} · ${location.host}`,
+  });
+  const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
+  if (!blob) { showToast('Could not create the image'); return; }
+  const slug = (single ? `${single.player}-vs-${single.opponent}-${single.date}` : `${who}-season`).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  await shareOrDownload(blob, `at-bat-log-${slug || 'report'}.png`, CONFIG.appName);
 }
 
 function viewSplits(sp) {
@@ -547,7 +585,7 @@ function viewSettings() {
     <button class="btn secondary block" data-act="csv">Export all pitches (CSV)</button>
     <button class="btn secondary block" data-act="backup">Download backup</button>
     <label class="btn secondary block file-btn">Restore from backup<input type="file" accept="application/json,.json" id="restore"></label>
-    <p class="hint">Download a backup now and then. Clearing browser data or removing the app erases the log.</p>
+    <p class="hint">${db.prefs.backupAt ? `Last backup: ${new Date(db.prefs.backupAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}. ` : ''}Save a backup now and then (email it to yourself or keep it in Files). Clearing browser data or removing the app erases the log.</p>
     <h2 class="section">App</h2>
     ${install}
     <div class="about"><a class="link" href="privacy.html">Privacy</a>${CONFIG.supportEmail ? `<a class="link" href="mailto:${esc(CONFIG.supportEmail)}">Contact</a>` : ''}<span class="muted">Version ${esc(CONFIG.version)}</span></div>
@@ -632,11 +670,15 @@ document.addEventListener('click', (e) => {
     case 'spray-pick': { const i = Number(el.dataset.i); ui.sprayPick = ui.sprayPick === i ? null : i; render(); break; }
     case 'csv': {
       if (!db.games.length) { showToast('No games to export yet'); break; }
-      download(`at-bat-log-pitches-${today()}.csv`, toCSV(db.games), 'text/csv');
+      saveFile(`at-bat-log-pitches-${today()}.csv`, toCSV(db.games), 'text/csv');
       break;
     }
-    case 'backup':
-      download(`at-bat-log-backup-${today()}.json`, JSON.stringify(db, null, 1), 'application/json');
+    case 'backup': doBackup(); break;
+    case 'backup-later':
+      db.prefs.backupSnoozeAt = loggedGames(); // ask again after the next game
+      persist(); render(); break;
+    case 'share-report':
+      if (!ui.busy) { ui.busy = true; shareReport().catch(() => showToast('Could not share the report')).finally(() => { ui.busy = false; }); }
       break;
     case 'wipe':
       if (confirm('Erase every game and pitch on this phone? Download a backup first if you might want them.') && confirm('Really erase everything?')) {
@@ -671,7 +713,7 @@ document.addEventListener('change', (e) => {
     t.files[0].text().then((text) => {
       const data = store.parseBackup(text);
       if (!confirm(`Replace the data on this phone with the backup (${data.games.length} games)?`)) return;
-      db = data; persist(); showToast('Backup restored'); go('#/');
+      db = data; db.prefs.backupGames = loggedGames(); persist(); showToast('Backup restored'); go('#/');
     }).catch((err) => showToast(`Restore failed: ${err.message}`, 4000));
   }
 });
