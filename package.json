@@ -1,0 +1,11 @@
+{
+  "name": "atbat-log",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Offline PWA for logging youth baseball at-bats pitch by pitch",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "start": "python3 -m http.server 8080"
+  }
+}
