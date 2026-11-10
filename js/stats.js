@@ -336,3 +336,25 @@ export function buildInsights(rep) {
   }
   return out;
 }
+
+// ---------- good / needs-work scale ----------
+// Where a stat sits between "needs work" (0) and "great" (1). These anchors are a general guide for
+// youth hitters, set by judgment; they are NOT percentiles against other players. Tune them here.
+export const SCALE = {
+  chase: { poor: 0.45, great: 0.15 },
+  zoneSwing: { poor: 0.5, great: 0.8 },
+  heartTake: { poor: 0.4, great: 0.1 },
+  twoStrikeChase: { poor: 0.5, great: 0.2 },
+  whiff: { poor: 0.45, great: 0.1 },
+  zoneContact: { poor: 0.65, great: 0.95 },
+  swStr: { poor: 0.2, great: 0.04 },
+  hardHit: { poor: 0.15, great: 0.5 },
+  kRate: { poor: 0.35, great: 0.08 },
+};
+/** 0..1 position on the scale, or null when the stat has no scale or no data. */
+export function scaleScore(key, m) {
+  const sc = SCALE[key];
+  if (!sc || !m || m.value == null) return null;
+  const t = (m.value - sc.poor) / (sc.great - sc.poor);
+  return Math.min(1, Math.max(0, t));
+}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { replayGame, buildReport, toCSV, defaultZoneForLoc, countState } from '../js/stats.js';
+import { replayGame, buildReport, toCSV, defaultZoneForLoc, countState, scaleScore, metric } from '../js/stats.js';
 
 const P = (result, zone = 'heart', extra = {}) => ({ type: 'pitch', zone, loc: null, result, t: 0, ...extra });
 const game = (events, id = 'g1') => ({ id, date: '2026-05-01', opponent: 'Tigers', player: 'Sam', createdAt: 1, events });
@@ -98,4 +98,13 @@ test('CSV export escapes and includes every pitch', () => {
   assert.equal(csv.length, 3);
   assert.match(csv[1], /"Cubs, ""Blue"""/);
   assert.match(csv[2], /Home run,Home run/);
+});
+
+test('scale: direction, clamping and stats without a scale', () => {
+  assert.equal(scaleScore('chase', metric(15, 100, 25)), 1);      // 15% chase = great
+  assert.equal(scaleScore('chase', metric(60, 100, 25)), 0);      // clamped at needs-work
+  assert.ok(Math.abs(scaleScore('chase', metric(30, 100, 25)) - 0.5) < 1e-9);
+  assert.equal(scaleScore('zoneSwing', metric(80, 100, 25)), 1);  // higher is better
+  assert.equal(scaleScore('firstPitchSwing', metric(5, 10, 10)), null);
+  assert.equal(scaleScore('chase', metric(0, 0, 25)), null);
 });

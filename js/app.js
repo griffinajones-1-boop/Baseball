@@ -4,7 +4,7 @@ import { CONFIG } from './config.js';
 import {
   RESULTS, ZONES, ZONE_LABELS, CONTACT, TRAJ, OUTCOMES, PA_RESULTS, GRID, MIN_N, HITS,
   replayGame, buildReport, buildInsights, buildTrends, gameLine,
-  defaultZoneForLoc, locName, toCSV,
+  defaultZoneForLoc, locName, toCSV, scaleScore,
 } from './stats.js';
 import { fieldSVG, pointToField } from './field.js';
 import { renderSummary, shareOrDownload } from './share.js';
@@ -312,11 +312,21 @@ function filteredGames() {
     && (f.game === 'all' || g.id === f.game));
 }
 
-function statRow(label, m, def, fmt = pct) {
+// Blue (needs work) -> gray -> red (great), like a scouting slider. Small samples stay gray.
+function scaleColor(t) {
+  return t < 0.5
+    ? `color-mix(in oklab, var(--div-mid) ${Math.round(t * 200)}%, var(--div-lo))`
+    : `color-mix(in oklab, var(--div-hi) ${Math.round((t - 0.5) * 200)}%, var(--div-mid))`;
+}
+function statRow(key, label, m, def, fmt = pct) {
   const n = !m.den ? 'No data' : fmt === pct ? `${m.num} of ${m.den}` : `${m.den} PA`;
-  return `<details class="stat ${m.small && m.den ? 'is-small' : ''}"><summary>
-    <span class="stat-label">${label}<small>${n}${m.small && m.den ? ' · small sample' : ''}</small></span>
-    <span class="stat-val">${fmt(m.value)}</span></summary>
+  const small = m.small && m.den;
+  const t = scaleScore(key, m);
+  const word = t == null ? '' : t >= 0.8 ? 'Great' : t >= 0.6 ? 'Good' : t > 0.4 ? 'Average' : t > 0.2 ? 'Below average' : 'Needs work';
+  const bar = t == null ? '' : `<span class="meter ${small ? 'is-small' : ''}" role="img" aria-label="${small ? 'Too few pitches to rate' : word}" style="--t:${(t * 100).toFixed(0)}%;--c:${small ? 'var(--div-mid)' : scaleColor(t)}"><i></i><b></b></span>`;
+  return `<details class="stat ${small ? 'is-small' : ''}"><summary>
+    <span class="stat-label">${label}<small>${n}${small ? ' · small sample' : t != null ? ` · ${word.toLowerCase()}` : ''}</small></span>
+    <span class="stat-val">${fmt(m.value)}</span>${bar}</summary>
     <p class="stat-def">${def}</p></details>`;
 }
 
@@ -361,25 +371,26 @@ function viewReport() {
 
     ${!single && isPro && CONFIG.features.insights ? viewInsights(rep) : ''}
 
+    <div class="scale-key" aria-hidden="true"><span>Needs work</span><i></i><span>Great</span></div>
     <h2 class="section">Swing decisions</h2>
     <div class="stats">
-      ${statRow('Chase rate', S.chase, 'Swings at Chase + Waste pitches ÷ Chase + Waste pitches.')}
-      ${statRow('Zone swing rate', S.zoneSwing, 'Swings at Heart + Edge pitches ÷ Heart + Edge pitches.')}
-      ${statRow('Heart take rate', S.heartTake, 'Heart pitches taken ÷ Heart pitches. Lower is better.')}
-      ${statRow('First-pitch swing', S.firstPitchSwing, 'Swings at the first pitch of a PA ÷ first pitches.')}
-      ${statRow('Two-strike chase', S.twoStrikeChase, 'Chase rate with two strikes.')}
+      ${statRow('chase', 'Chase rate', S.chase, 'Swings at Chase + Waste pitches ÷ Chase + Waste pitches.')}
+      ${statRow('zoneSwing', 'Zone swing rate', S.zoneSwing, 'Swings at Heart + Edge pitches ÷ Heart + Edge pitches.')}
+      ${statRow('heartTake', 'Heart take rate', S.heartTake, 'Heart pitches taken ÷ Heart pitches. Lower is better.')}
+      ${statRow('firstPitchSwing', 'First-pitch swing', S.firstPitchSwing, 'Swings at the first pitch of a PA ÷ first pitches.')}
+      ${statRow('twoStrikeChase', 'Two-strike chase', S.twoStrikeChase, 'Chase rate with two strikes.')}
     </div>
     <h2 class="section">Contact</h2>
     <div class="stats">
-      ${statRow('Whiff rate', S.whiff, 'Swinging strikes ÷ swings.')}
-      ${statRow('Zone contact', S.zoneContact, 'Fouls + balls in play ÷ swings at Heart + Edge pitches.')}
-      ${statRow('Swinging-strike rate', S.swStr, 'Swinging strikes ÷ all pitches.')}
-      ${statRow('Hard-hit rate', S.hardHit, 'Hard contact ÷ balls in play.')}
+      ${statRow('whiff', 'Whiff rate', S.whiff, 'Swinging strikes ÷ swings.')}
+      ${statRow('zoneContact', 'Zone contact', S.zoneContact, 'Fouls + balls in play ÷ swings at Heart + Edge pitches.')}
+      ${statRow('swStr', 'Swinging-strike rate', S.swStr, 'Swinging strikes ÷ all pitches.')}
+      ${statRow('hardHit', 'Hard-hit rate', S.hardHit, 'Hard contact ÷ balls in play.')}
     </div>
     <h2 class="section">Plate appearances</h2>
     <div class="stats">
-      ${statRow('K rate', S.kRate, 'Strikeouts ÷ plate appearances.')}
-      ${statRow('Pitches per PA', S.pPerPA, 'Average pitches seen per plate appearance.', (v) => (v == null ? '—' : v.toFixed(1)))}
+      ${statRow('kRate', 'K rate', S.kRate, 'Strikeouts ÷ plate appearances.')}
+      ${statRow('pPerPA', 'Pitches per PA', S.pPerPA, 'Average pitches seen per plate appearance.', (v) => (v == null ? '—' : v.toFixed(1)))}
     </div>
 
     ${!single && isPro && CONFIG.features.trends ? viewTrends(games) : ''}
@@ -392,7 +403,7 @@ function viewReport() {
     ${viewSpray(rep, games)}` : viewUpsell()}
 
     ${single ? `<h2 class="section">Pitch by pitch</h2>${viewPALog(rep.allPAs)}` : ''}
-    <p class="footnote">Faded numbers have too few pitches behind them to trust yet. Tap any stat for its definition. In zone = Heart + Edge.</p>
+    <p class="footnote">Gray bars and faded numbers have too few pitches behind them to rate yet. The blue-to-red scale is a general guide for youth hitters, not a ranking against other players. Tap any stat for its definition. In zone = Heart + Edge.</p>
   </main>`;
 }
 

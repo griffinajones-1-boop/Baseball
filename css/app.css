@@ -31,6 +31,9 @@
   --f-dirt: #e6d4b5;
   --f-infield: #c2dcb0;
   --f-line: #ffffff;
+  --div-lo: #2a78d6;
+  --div-mid: #b9b7af;
+  --div-hi: #e34948;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -63,6 +66,9 @@
     --f-dirt: #3d3324;
     --f-infield: #2d4528;
     --f-line: #cfcfc8;
+    --div-lo: #3987e5;
+    --div-mid: #6f6e68;
+    --div-hi: #e66767;
   }
 }
 
@@ -372,3 +378,14 @@ td.is-small { color: var(--muted); }
 .nudge small { color: var(--text-2); font-size: .85rem; }
 .nudge-actions { display: flex; justify-content: flex-end; align-items: center; gap: 16px; }
 .nudge .btn { min-height: 44px; }
+
+/* ---------- rating meter (blue = needs work, red = great) ---------- */
+.stat summary { flex-wrap: wrap; }
+.meter { position: relative; flex: 0 0 100%; height: 6px; border-radius: 3px; background: var(--fill); margin: 2px 0 6px; }
+.meter i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--t); min-width: 6px; border-radius: 3px; background: var(--c); opacity: .45; }
+.meter b { position: absolute; top: 50%; left: clamp(8px, var(--t), calc(100% - 8px)); width: 16px; height: 16px; border-radius: 50%; transform: translate(-50%, -50%); background: var(--c); border: 2.5px solid var(--bg); }
+.meter.is-small b { background: var(--bg); border-color: var(--div-mid); }
+.meter.is-small i { opacity: .25; }
+.scale-key { display: flex; align-items: center; gap: 10px; margin-top: 24px; font-size: .75rem; color: var(--muted); }
+.scale-key i { flex: 1; height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--div-lo), var(--div-mid), var(--div-hi)); }
+.scale-key + h2.section { margin-top: 20px; }
