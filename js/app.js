@@ -4,7 +4,7 @@ import { CONFIG } from './config.js';
 import {
   RESULTS, ZONES, ZONE_LABELS, CONTACT, TRAJ, OUTCOMES, PA_RESULTS, GRID, MIN_N, HITS,
   replayGame, buildReport, buildInsights, buildTrends, gameLine,
-  defaultZoneForLoc, locName, toCSV, scaleScore,
+  defaultZoneForLoc, locName, toCSV, scaleScore, PITCH_TYPES, buildHeat,
 } from './stats.js';
 import { fieldSVG, pointToField } from './field.js';
 import { renderSummary, shareOrDownload } from './share.js';
@@ -13,6 +13,8 @@ let db = store.load();
 let installPrompt = null; // Android/desktop "install app" event
 const ui = {
   sel: { zone: null, loc: null },
+  pitchType: null, // optional: FB / BR / CH for the pitch being logged
+  heatType: 'all',
   ip: null, // in-play sheet state
   menu: false,
   report: { player: 'all', season: 'all', game: 'all' },
@@ -91,7 +93,7 @@ function route() {
 }
 function go(hash) { location.hash = hash; }
 window.addEventListener('hashchange', () => {
-  ui.ip = null; ui.menu = false; ui.sel = { zone: null, loc: null }; ui.countKey = '';
+  ui.ip = null; ui.menu = false; ui.sel = { zone: null, loc: null }; ui.pitchType = null; ui.countKey = '';
   render(); window.scrollTo(0, 0);
 });
 
@@ -193,6 +195,7 @@ function viewPlayer() {
     ${deep ? `
     <h2 class="section">Hot and cold zones</h2>
     ${viewHeat(rep)}
+    ${viewByType(rep)}
     <h2 class="section">Where the ball goes</h2>
     ${viewSpray(rep, games)}` : viewUpsell()}
 
@@ -291,7 +294,7 @@ function viewLive(g) {
   if (last && last.type === 'end') lastText = `PA ended · ${PA_RESULTS[last.reason]}`;
   else if (last) {
     const lp = pitches[pitches.length - 1];
-    lastText = `${lp.balls}-${lp.strikes} ${RESULTS[lp.result]}${lp.result === 'IP' && lp.outcome ? ` · ${OUTCOMES[lp.outcome]}` : ''} · ${ZONE_LABELS[lp.zone]}`;
+    lastText = `${lp.balls}-${lp.strikes} ${RESULTS[lp.result]}${lp.result === 'IP' && lp.outcome ? ` · ${OUTCOMES[lp.outcome]}` : ''} · ${ZONE_LABELS[lp.zone]}${lp.pitch ? ` · ${PITCH_TYPES[lp.pitch]}` : ''}`;
   }
   const countKey = `${current.num}:${b}-${s}`;
   const pop = ui.countKey && ui.countKey !== countKey ? 'pop' : '';
@@ -322,6 +325,7 @@ function viewLive(g) {
       <div class="locgrid" aria-label="Pitch location, catcher's view">${cells}<div class="sz-outline" aria-hidden="true"></div></div>
       <div class="zbtns" id="zbtns">${zoneBtns}</div>
     </section>
+    ${db.prefs.pitchTypes === false ? '' : `<section class="ptypes" aria-label="Pitch type, optional">${Object.entries(PITCH_TYPES).map(([k, v]) => `<button class="ptype ${ui.pitchType === k ? 'sel' : ''}" data-act="ptype" data-v="${k}">${v}</button>`).join('')}</section>`}
     <section class="laststrip">
       <span class="last-text">${esc(lastText)}</span>
       <button class="undo" data-act="undo" ${g.events.length ? '' : 'disabled'}>↶ Undo</button>
@@ -378,9 +382,10 @@ function logPitch(result, extra = {}) {
     return false;
   }
   const before = replayGame(g).current.num;
-  g.events.push({ type: 'pitch', t: Date.now(), zone, loc: ui.sel.loc, result, ...extra });
+  g.events.push({ type: 'pitch', t: Date.now(), zone, loc: ui.sel.loc, result, ...(ui.pitchType ? { pitch: ui.pitchType } : {}), ...extra });
   persist();
   ui.sel = { zone: null, loc: null };
+  ui.pitchType = null;
   ui.ip = null;
   const after = replayGame(g);
   if (after.current.num !== before) {
@@ -425,7 +430,7 @@ function statRow(key, label, m, def, fmt = pct) {
   const word = t == null ? '' : t >= 0.8 ? 'Great' : t >= 0.6 ? 'Good' : t > 0.4 ? 'Average' : t > 0.2 ? 'Below average' : 'Needs work';
   const bar = t == null ? '' : `<span class="meter ${small ? 'is-small' : ''}" role="img" aria-label="${tiny ? 'Too few pitches to rate' : small ? `Early read: ${word}` : word}" style="--t:${(t * 100).toFixed(0)}%;--c:${tiny ? 'var(--div-mid)' : scaleColor(t)}"><i></i><b></b></span>`;
   return `<details class="stat ${small ? 'is-small' : ''}"><summary>
-    <span class="stat-label">${label}<small>${n}${small ? ` · ${tiny ? 'too few to rate' : `early read${t != null ? `: ${word.toLowerCase()}` : ''}`}` : t != null ? ` · ${word.toLowerCase()}` : ''}</small></span>
+    <span class="stat-label">${label}<small>${n}${small ? ` · ${t == null ? 'small sample' : tiny ? 'too few to rate' : `early read: ${word.toLowerCase()}`}` : t != null ? ` · ${word.toLowerCase()}` : ''}</small></span>
     <span class="stat-val">${fmt(m.value)}</span>${bar}</summary>
     <p class="stat-def">${def}</p></details>`;
 }
@@ -495,6 +500,7 @@ function viewReport() {
 
     ${!single && isPro && CONFIG.features.trends ? viewTrends(games) : ''}
     ${deep ? `
+    ${viewByType(rep)}
     <h2 class="section">By count</h2>
     ${viewSplits(rep.splits)}
     <h2 class="section">Heat map</h2>
@@ -613,7 +619,9 @@ function viewHeat(rep) {
   const mode = HEAT_MODES[ui.heat] ? ui.heat : 'avg';
   const M = HEAT_MODES[mode];
   const cw = 44, ch = 50, gap = 2;
-  const vals = rep.heat.map(M.get);
+  if (ui.heatType !== 'all' && !rep.typed) ui.heatType = 'all';
+  const src = ui.heatType === 'all' ? rep : buildHeat(rep.pitches.filter((p) => p.pitch === ui.heatType));
+  const vals = src.heat.map(M.get);
   const max = mode === 'seen' ? Math.max(1, ...vals.map((x) => x.v || 0)) : 1;
   const any = vals.some((x) => x.v != null);
   const cells = vals.map((x, i) => {
@@ -626,7 +634,7 @@ function viewHeat(rep) {
       <rect x="${c * cw + gap / 2}" y="${r * ch + gap / 2}" width="${cw - gap}" height="${ch - gap}" rx="4" fill="${fill}"/>
       <text x="${c * cw + cw / 2}" y="${r * ch + ch / 2 + 5}" text-anchor="middle">${x.text}</text></g>`;
   }).join('');
-  const pick = ui.heatPick != null ? rep.heat[ui.heatPick] : null;
+  const pick = ui.heatPick != null ? src.heat[ui.heatPick] : null;
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : (w.endsWith('h') ? 'es' : 's')}`;
   const caption = pick
     ? `<b>${esc(locName(ui.heatPick))}</b>: ${plural(pick.seen, 'pitch')}, ${plural(pick.swings, 'swing')}, ${plural(pick.whiffs, 'whiff')}${pick.ab ? ` · ${pick.hits}-for-${pick.ab} (${rate3(pick.hits / pick.ab)})` : ''}${pick.bip ? ` · ${pick.hard} of ${pick.bip} hit hard` : ''}`
@@ -636,12 +644,24 @@ function viewHeat(rep) {
     ? `<div class="scale-key heat-key" aria-hidden="true"><span>${mode === 'avg' ? rate3(M.lo) : pct(M.lo)}</span><i class="hotcold"></i><span>${mode === 'avg' ? rate3(M.hi) : pct(M.hi)}</span></div>` : '';
   const explain = mode === 'avg' ? 'Batting average on at-bats that ended on a pitch in each spot (balls in play and strike three).'
     : mode === 'hard' ? 'Share of balls in play from each spot that were hit hard.' : '';
-  return `<div class="segs">${Object.keys(HEAT_MODES).map(tab).join('')}</div>
+  const typeChips = !rep.typed ? '' : `<div class="chips-row tight">${[['all', 'All pitches'], ...Object.entries(PITCH_TYPES)].map(([k, v]) => `<button class="chipbtn small ${ui.heatType === k ? 'sel' : ''}" data-act="heat-type" data-v="${k}">${v}</button>`).join('')}</div>`;
+  return `<div class="segs">${Object.keys(HEAT_MODES).map(tab).join('')}</div>${typeChips}
     <div class="heat-wrap"><svg class="heat" viewBox="0 0 ${cw * GRID} ${ch * GRID}" role="img" aria-label="Zone heat map, catcher's view">
       ${cells}<rect class="sz" x="${cw}" y="${ch}" width="${cw * 3}" height="${ch * 3}" rx="3"/></svg>${key}</div>
     <p class="hint heat-caption">${caption}</p>
     ${explain ? `<p class="hint center">${explain} Faded boxes have fewer than ${MIN_N.heatAB}.</p>` : ''}
-    ${rep.noLoc ? `<p class="hint center">${rep.noLoc} pitch${rep.noLoc === 1 ? '' : 'es'} logged without a location</p>` : ''}`;
+    ${src.noLoc ? `<p class="hint center">${src.noLoc} pitch${src.noLoc === 1 ? '' : 'es'} logged without a location</p>` : ''}`;
+}
+
+function viewByType(rep) {
+  if (!rep.typed) return '';
+  const cell = (m, fmt = pct) => `<td class="${m.small ? 'is-small' : ''}">${fmt(m.value)}<small>${m.den ? `${m.num}/${m.den}` : ''}</small></td>`;
+  const rows = Object.entries(rep.byType).map(([k, t]) => `<tr><th>${k === 'NA' ? 'Not marked' : PITCH_TYPES[k]}<small>${t.pitches} pitch${t.pitches === 1 ? '' : 'es'}</small></th>${cell(t.swing)}${cell(t.whiff)}${cell(t.chase)}${cell(t.avg, rate3)}${cell(t.hard)}</tr>`).join('');
+  return `<h2 class="section">By pitch type</h2>
+    <div class="table-wrap"><table class="splits">
+    <thead><tr><th>Pitch</th><th>Swing</th><th>Whiff</th><th>Chase</th><th>AVG</th><th>Hard hit</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+    <p class="hint">AVG counts at-bats that ended on that pitch. Faded numbers are small samples.</p>`;
 }
 
 function viewSpray(rep, games) {
@@ -666,7 +686,7 @@ function viewSpray(rep, games) {
 function viewPALog(pas) {
   const code = { B: 'B', CS: 'K', SS: 'S', F: 'F', IP: 'X', HBP: 'H' };
   return `<ol class="palog">${pas.map((pa) => `<li><b>${esc(describePA(pa))}</b>
-    <span class="seq">${pa.pitches.map((p) => `<i class="pc r-${p.result}" title="${esc(RESULTS[p.result])} · ${esc(ZONE_LABELS[p.zone])}">${code[p.result]}</i>`).join('')}</span>
+    <span class="seq">${pa.pitches.map((p) => `<i class="pc r-${p.result}" title="${esc(RESULTS[p.result])} · ${esc(ZONE_LABELS[p.zone])}${p.pitch ? ` · ${PITCH_TYPES[p.pitch]}` : ''}">${code[p.result]}</i>`).join('')}</span>
     ${(() => { const lp = pa.pitches[pa.pitches.length - 1]; return lp && lp.result === 'IP' ? `<small>${esc([lp.contact, lp.traj && TRAJ[lp.traj].toLowerCase()].filter(Boolean).join(' '))}</small>` : ''; })()}
   </li>`).join('')}</ol>
   <p class="hint">B ball · K called strike · S swinging strike · F foul · X in play · H hit by pitch</p>`;
@@ -711,6 +731,9 @@ function viewSettings() {
     : '<p class="hint">To install: on iPhone tap Share, then “Add to Home Screen”. On Android tap ⋮, then “Install app”.</p>';
   return `<main class="page"><header class="top"><h1>Settings</h1></header>
     ${proRow}
+    <h2 class="section">Logging</h2>
+    <label class="toggle"><span><b>Track pitch type</b><small>Adds an optional Fastball / Breaking / Changeup row while logging</small></span>
+      <input type="checkbox" id="pref-ptypes" ${db.prefs.pitchTypes === false ? '' : 'checked'}></label>
     <h2 class="section">Your data</h2>
     <p class="muted small">${db.games.length} game${db.games.length === 1 ? '' : 's'} · ${n} pitches, stored only on this phone.</p>
     <button class="btn secondary block" data-act="csv">Export all pitches (CSV)</button>
@@ -753,6 +776,10 @@ document.addEventListener('click', (e) => {
       else ui.sel = { loc, zone: defaultZoneForLoc(loc) };
       buzz(6); render(); break;
     }
+    case 'ptype':
+      ui.pitchType = ui.pitchType === el.dataset.v ? null : el.dataset.v;
+      buzz(6); render(); break;
+    case 'heat-type': ui.heatType = el.dataset.v; ui.heatPick = null; render(); break;
     case 'zone':
       ui.sel.zone = ui.sel.zone === el.dataset.zone ? null : el.dataset.zone;
       buzz(6); render(); break;
@@ -847,7 +874,9 @@ document.addEventListener('click', (e) => {
 
 document.addEventListener('change', (e) => {
   const t = e.target;
-  if (t.dataset.playerSeason) {
+  if (t.id === 'pref-ptypes') {
+    db.prefs.pitchTypes = t.checked; persist();
+  } else if (t.dataset.playerSeason) {
     ui.player.season = t.value; ui.heatPick = null; ui.sprayPick = null; render();
   } else if (t.dataset.filter) {
     ui.report[t.dataset.filter] = t.value;

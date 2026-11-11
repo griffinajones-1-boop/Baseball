@@ -121,3 +121,20 @@ test('heat map: batting average and hard contact by location', () => {
   assert.deepEqual([h[0].ab, h[0].hits], [1, 0]);
   assert.equal(h[7].ab, 0);
 });
+
+test('pitch types: split, filtered heat map and CSV column', async () => {
+  const { buildHeat } = await import('../js/stats.js');
+  const g = game([
+    P('IP', 'heart', { loc: 12, pitch: 'FB', outcome: '1B', contact: 'hard' }),
+    P('SS', 'chase', { loc: 20, pitch: 'BR' }), P('SS', 'chase', { loc: 20, pitch: 'BR' }), P('B', 'chase', { loc: 0 }), P('SS', 'chase', { loc: 24, pitch: 'BR' }),
+  ]);
+  const r = buildReport([g]);
+  assert.equal(r.typed, true);
+  assert.deepEqual(Object.keys(r.byType), ['FB', 'BR', 'NA']);
+  assert.deepEqual([r.byType.FB.avg.num, r.byType.FB.avg.den], [1, 1]);
+  assert.deepEqual([r.byType.BR.whiff.num, r.byType.BR.whiff.den, r.byType.BR.avg.den], [3, 3, 1]);
+  const h = buildHeat(r.pitches.filter((p) => p.pitch === 'BR')).heat;
+  assert.equal(h[20].seen, 2); assert.equal(h[12].seen, 0);
+  assert.match(toCSV([g]).split('\r\n')[1], /,Fastball,heart,/);
+  assert.equal(buildReport([game([P('B', 'chase')])]).typed, false);
+});

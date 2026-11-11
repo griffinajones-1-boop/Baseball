@@ -11,6 +11,7 @@ export const RESULTS = {
 };
 export const ZONES = ['heart', 'edge', 'chase', 'waste'];
 export const ZONE_LABELS = { heart: 'Heart', edge: 'Edge', chase: 'Chase', waste: 'Waste' };
+export const PITCH_TYPES = { FB: 'Fastball', BR: 'Breaking', CH: 'Changeup' };
 export const CONTACT = ['weak', 'medium', 'hard'];
 export const TRAJ = { GB: 'Ground ball', LD: 'Line drive', FB: 'Fly ball', PU: 'Popup' };
 export const OUTCOMES = { OUT: 'Out', '1B': 'Single', '2B': 'Double', '3B': 'Triple', HR: 'Home run', E: 'Error' };
@@ -183,7 +184,43 @@ export function buildReport(games) {
     };
   }
 
-  // Heat map cells (5x5).
+  const { heat, noLoc } = buildHeat(pitches);
+
+  // Results by pitch type (only pitches where a type was logged, plus the untyped rest).
+  const byType = {};
+  for (const key of [...Object.keys(PITCH_TYPES), 'NA']) {
+    const ps = pitches.filter((p) => (p.pitch || 'NA') === key);
+    if (!ps.length) continue;
+    const sw = ps.filter((p) => isSwing(p.result));
+    const out = ps.filter((p) => outZone(p.zone));
+    const ends = ps.filter((p) => p.result === 'IP' || ((p.result === 'SS' || p.result === 'CS') && p.strikes === 2));
+    const bipT = ps.filter((p) => p.result === 'IP' && p.contact);
+    byType[key] = {
+      pitches: ps.length,
+      swing: metric(sw.length, ps.length, MIN_N.split),
+      whiff: metric(count(sw, (p) => p.result === 'SS'), sw.length, MIN_N.split),
+      chase: metric(count(out, (p) => isSwing(p.result)), out.length, MIN_N.split),
+      avg: metric(count(ends, (p) => p.result === 'IP' && HITS.has(p.outcome)), ends.length, MIN_N.hardHit),
+      hard: metric(count(bipT, (p) => p.contact === 'hard'), bipT.length, MIN_N.hardHit),
+    };
+  }
+  const typed = pitches.some((p) => p.pitch);
+
+  const outcomes = {};
+  for (const pa of pas) outcomes[pa.result] = (outcomes[pa.result] || 0) + 1;
+
+  const spray = pitches
+    .filter((p) => p.result === 'IP' && p.spray)
+    .map((p) => ({ x: p.spray.x, y: p.spray.y, contact: p.contact, traj: p.traj, outcome: p.outcome, gameId: p.gameId, paNum: p.paNum }));
+
+  return {
+    pitchCount: pitches.length, paCount: realPAs.length, allPAs: pas, pitches,
+    stats, slash, splits, heat, noLoc, outcomes, spray, byType, typed,
+  };
+}
+
+/** Heat map cells (5x5) for a set of annotated pitches. */
+export function buildHeat(pitches) {
   const heat = Array.from({ length: GRID * GRID }, () => ({ seen: 0, swings: 0, whiffs: 0, takes: 0, ab: 0, hits: 0, bip: 0, hard: 0 }));
   let noLoc = 0;
   for (const p of pitches) {
@@ -199,18 +236,7 @@ export function buildReport(games) {
       if (p.contact) { c.bip++; if (p.contact === 'hard') c.hard++; }
     } else if ((p.result === 'SS' || p.result === 'CS') && p.strikes === 2) c.ab++;
   }
-
-  const outcomes = {};
-  for (const pa of pas) outcomes[pa.result] = (outcomes[pa.result] || 0) + 1;
-
-  const spray = pitches
-    .filter((p) => p.result === 'IP' && p.spray)
-    .map((p) => ({ x: p.spray.x, y: p.spray.y, contact: p.contact, traj: p.traj, outcome: p.outcome, gameId: p.gameId, paNum: p.paNum }));
-
-  return {
-    pitchCount: pitches.length, paCount: realPAs.length, allPAs: pas, pitches,
-    stats, slash, splits, heat, noLoc, outcomes, spray,
-  };
+  return { heat, noLoc };
 }
 
 export function slashLine(pas) {
@@ -238,7 +264,7 @@ export function slashLine(pas) {
 // ---------- CSV ----------
 const CSV_COLS = [
   'game_id', 'game_date', 'opponent', 'player', 'pa_number', 'pitch_number',
-  'balls_before', 'strikes_before', 'count_state', 'zone', 'in_zone',
+  'balls_before', 'strikes_before', 'count_state', 'pitch_type', 'zone', 'in_zone',
   'location_cell', 'location_row', 'location_col', 'location_label',
   'result', 'swing', 'contact_quality', 'trajectory', 'spray_x', 'spray_y',
   'bip_outcome', 'pa_result', 'timestamp',
@@ -260,7 +286,7 @@ export function toCSV(games) {
       rows.push([
         g.id, g.date, g.opponent, g.player, p.paNum, p.pitchNum,
         p.balls, p.strikes, `${p.balls}-${p.strikes} ${countState(p.balls, p.strikes)}`,
-        p.zone, inZone(p.zone) ? 'Y' : 'N',
+        p.pitch ? PITCH_TYPES[p.pitch] : null, p.zone, inZone(p.zone) ? 'Y' : 'N',
         p.loc, rc[0], rc[1], locName(p.loc),
         RESULTS[p.result] || p.result, isSwing(p.result) ? 'Y' : 'N',
         p.contact, p.traj ? TRAJ[p.traj] : null,

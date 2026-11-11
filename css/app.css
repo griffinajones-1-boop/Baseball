@@ -182,7 +182,7 @@ body[data-view="game"] { overscroll-behavior: none; }
   font-weight: 700; font-size: 1rem; cursor: pointer;
 }
 
-.results { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: minmax(72px, 1fr); gap: 8px; margin-top: auto; flex: 1 1 auto; max-height: 216px; align-content: end; }
+.results { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: minmax(60px, 1fr); gap: 8px; margin-top: auto; flex: 1 1 auto; max-height: 216px; align-content: end; }
 .rbtn {
   border-radius: 14px; border: 0; font-weight: 700; font-size: 1rem; line-height: 1.15;
   background: var(--surface); box-shadow: var(--shadow); cursor: pointer;
@@ -437,3 +437,14 @@ body[data-tabs="1"] .toast { top: max(8px, env(safe-area-inset-top)); }
 .hcell.small { opacity: 1; }
 .hcell.small rect { opacity: .4; }
 .hcell.small text, .hcell.small.hot text, .hcell.small.hotw text { fill: var(--heat-text); opacity: .75; }
+
+/* ---------- pitch type ---------- */
+.ptypes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.ptype { min-height: 40px; border: 0; border-radius: 10px; background: var(--fill); font-weight: 600; font-size: .9rem; color: var(--text-2); cursor: pointer; transition: background-color .12s ease, color .12s ease; }
+.ptype.sel { background: var(--text); color: var(--bg); }
+.chips-row.tight { margin: -4px 0 10px; }
+.chipbtn.small { min-height: 34px; padding: 0 12px; font-size: .82rem; }
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0; cursor: pointer; }
+.toggle span { display: grid; gap: 2px; }
+.toggle small { color: var(--muted); font-size: .82rem; }
+.toggle input { width: 26px; height: 26px; accent-color: var(--accent); flex: none; }
