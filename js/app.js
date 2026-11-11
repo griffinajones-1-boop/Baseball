@@ -16,6 +16,7 @@ const ui = {
   ip: null, // in-play sheet state
   menu: false,
   report: { player: 'all', season: 'all', game: 'all' },
+  player: { name: '', season: '' },
   heat: 'seen',
   heatPick: null,
   sprayPick: null,
@@ -80,7 +81,7 @@ function describePA(pa) {
   if (pa.result === 'K') return pa.kLooking ? 'Strikeout looking' : 'Strikeout swinging';
   return PA_RESULTS[pa.result] || pa.result;
 }
-const backHeader = (title, href = '#/', right = '<span class="spacer"></span>') => `<header class="top"><a class="icon-btn" href="${href}" aria-label="Back">‹</a><h1>${title}</h1>${right}</header>`;
+const backHeader = (title, href = '#/', right = '<span class="spacer"></span>') => `<header class="top"><a class="icon-btn" href="${href}" data-act="back" aria-label="Back">‹</a><h1>${title}</h1>${right}</header>`;
 
 // ---------- routing ----------
 function route() {
@@ -108,9 +109,97 @@ function render() {
     html = viewReport();
   } else if (r.view === 'settings') html = viewSettings();
   else if (r.view === 'pro' && pro.proEnabled()) html = viewPro();
-  else html = viewHome();
+  else if (r.view === 'player') html = viewPlayer();
+  else { html = viewHome(); r.view = 'home'; }
+  const tabs = ['home', 'player', 'settings'].includes(r.view);
+  if (tabs) html += tabBar(r.view);
   app.innerHTML = html + `<div id="toast" class="toast ${ui.toast ? 'show' : ''}" role="status" aria-live="polite">${esc(ui.toast || '')}</div>`;
   document.body.dataset.view = r.view;
+  document.body.dataset.tabs = tabs ? '1' : '0';
+}
+
+// ---------- tab bar ----------
+const TAB_ICONS = {
+  home: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+  player: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
+};
+function tabBar(active) {
+  const tab = (id, href, label) => `<a class="tab ${active === id ? 'on' : ''}" href="${href}" ${active === id ? 'aria-current="page"' : ''}>
+    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">${TAB_ICONS[id]}</svg>${label}</a>`;
+  return `<nav class="tabbar" aria-label="Main">${tab('home', '#/', 'Games')}${tab('player', '#/player', 'Player')}${tab('settings', '#/settings', 'Settings')}</nav>`;
+}
+
+// ---------- player page ----------
+const PROFILE_STATS = [
+  ['chase', 'Chase rate'], ['zoneSwing', 'Zone swing'], ['heartTake', 'Heart take'], ['twoStrikeChase', 'Two-strike chase'],
+  ['whiff', 'Whiff rate'], ['zoneContact', 'Zone contact'], ['swStr', 'Swinging strikes'], ['hardHit', 'Hard-hit rate'], ['kRate', 'K rate'],
+];
+function profileRow(key, label, m) {
+  const t = scaleScore(key, m);
+  const tiny = m.den < 5, small = m.small;
+  const word = t == null ? '' : t >= 0.8 ? 'Great' : t >= 0.6 ? 'Good' : t > 0.4 ? 'Average' : t > 0.2 ? 'Below average' : 'Needs work';
+  const note = !m.den ? 'no data yet' : tiny ? 'too few to rate' : small ? `early read: ${word.toLowerCase()}` : word.toLowerCase();
+  const bar = t == null ? '<span class="meter"></span>'
+    : `<span class="meter ${small ? 'is-small' : ''}" style="--t:${(t * 100).toFixed(0)}%;--c:${tiny ? 'var(--div-mid)' : scaleColor(t)}"><i></i><b></b></span>`;
+  return `<div class="prow ${small ? 'is-small' : ''}"><span class="prow-label">${label}<small>${note}</small></span><span class="prow-val">${pct(m.value)}</span>${bar}</div>`;
+}
+
+function viewPlayer() {
+  const ps = players();
+  if (!db.games.length || !ps.length) {
+    return `<main class="page"><header class="top"><h1>Player</h1></header>
+      <section class="welcome"><h2>Nothing here yet</h2><p>Log a game and this page fills in with your player's season: the slash line, how they rate, where the pitches and the hits go.</p></section>
+      <a class="btn primary huge" href="#/new">New game</a></main>`;
+  }
+  if (!ps.includes(ui.player.name)) ui.player = { name: sortedGames()[0].player || ps[0], season: '' };
+  const mine = db.games.filter((g) => g.player === ui.player.name);
+  const years = [...new Set(mine.map((g) => (g.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
+  if (!years.includes(ui.player.season)) ui.player.season = years[0] || '';
+  const games = mine.filter((g) => (g.date || '').startsWith(ui.player.season));
+  const rep = buildReport(games);
+  const S = rep.stats, sl = rep.slash;
+  const deep = pro.isPro();
+  const count = (r) => rep.allPAs.filter((pa) => pa.result === r).length;
+  const chips = ps.length > 1 ? `<div class="chips-row">${ps.map((n) => `<button class="chipbtn ${n === ui.player.name ? 'sel' : ''}" data-act="pick-player" data-player="${esc(n)}">${esc(n)}</button>`).join('')}</div>` : '';
+  const seasonPick = years.length > 1 ? `<select class="season-pick" data-player-season="1" aria-label="Season">${years.map((y) => `<option value="${y}" ${y === ui.player.season ? 'selected' : ''}>${y} season</option>`).join('')}</select>` : '';
+  const recent = [...games].sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.createdAt - a.createdAt).slice(0, 5).map((g) => {
+    const line = gameLine(replayGame(g).pas);
+    return `<li class="row"><a class="row-main" href="#/report/${g.id}"><b>vs ${esc(g.opponent || 'Opponent')}</b><span class="muted">${esc(fmtDate(g.date, false))}${line ? ` · ${esc(line)}` : ''}</span></a><span class="chev">›</span></li>`;
+  }).join('');
+  const tile = (v, l) => `<div><b>${v}</b><span>${l}</span></div>`;
+
+  return `<main class="page player">
+    <header class="top"><h1>Player</h1>${rep.pitchCount ? '<button class="link share-btn" data-act="share-player">Share</button>' : ''}</header>
+    ${chips}
+    <section class="pl-head">
+      <h2>${esc(ui.player.name)}</h2>
+      <p class="muted">${years.length > 1 ? '' : `${esc(ui.player.season)} season · `}${games.length} game${games.length === 1 ? '' : 's'} · ${rep.paCount} PA · ${rep.pitchCount} pitches</p>
+      ${seasonPick}
+    </section>
+    <div class="tiles big ${sl.small ? 'is-small' : ''}">${tile(rate3(sl.avg), 'AVG')}${tile(rate3(sl.obp), 'OBP')}${tile(rate3(sl.slg), 'SLG')}</div>
+    <div class="tiles">${tile(sl.h, 'Hits')}${tile(count('HR'), 'HR')}${tile(sl.bb, 'BB')}${tile(count('K'), 'K')}</div>
+    ${sl.small && sl.pa ? `<p class="hint center">Early in the season: only ${sl.pa} PA so far.</p>` : ''}
+
+    ${deep && CONFIG.features.insights ? viewInsights(rep) : ''}
+
+    <h2 class="section">How they rate</h2>
+    <div class="card">
+      <div class="scale-key in-card" aria-hidden="true"><span>Needs work</span><i></i><span>Great</span></div>
+      ${PROFILE_STATS.map(([k, l]) => profileRow(k, l, S[k])).join('')}
+    </div>
+    <p class="hint">A general guide for youth hitters, not a ranking against other players. Hollow markers are early reads.</p>
+
+    ${deep ? `
+    <h2 class="section">Where the pitches are</h2>
+    ${viewHeat(rep)}
+    <h2 class="section">Where the ball goes</h2>
+    ${viewSpray(rep, games)}` : viewUpsell()}
+
+    <h2 class="section">Recent games</h2>
+    <ul class="list">${recent}</ul>
+    <a class="btn secondary block" href="#/report" data-act="open-season" data-player="${esc(ui.player.name)}" data-season="${esc(ui.player.season)}">Full season report</a>
+  </main>`;
 }
 
 // ---------- home ----------
@@ -122,8 +211,8 @@ function seasonCard() {
   const rep = buildReport(games);
   if (!rep.paCount) return '';
   const sl = rep.slash;
-  return `<a class="season-card" href="#/report" data-act="open-season" data-player="${esc(latest.player)}" data-season="${esc(year)}">
-    <span class="sc-top">${esc(latest.player || 'Season')} · ${esc(year)}<span>Season report ›</span></span>
+  return `<a class="season-card" href="#/player" data-act="open-player" data-player="${esc(latest.player)}" data-season="${esc(year)}">
+    <span class="sc-top">${esc(latest.player || 'Season')} · ${esc(year)}<span>Player page ›</span></span>
     <span class="sc-stats">
       <span><b>${rate3(sl.avg)}</b>AVG</span>
       <span><b>${rate3(sl.obp)}</b>OBP</span>
@@ -138,7 +227,7 @@ function viewHome() {
   const many = players().length > 1;
   if (!games.length) {
     return `<main class="page">
-      <header class="top"><h1>${esc(CONFIG.appName)}</h1><a class="icon-btn" href="#/settings" aria-label="Settings">⚙</a></header>
+      <header class="top"><h1>${esc(CONFIG.appName)}</h1></header>
       <section class="welcome">
         <img src="icons/icon.svg" alt="" width="72" height="72">
         <h2>Every pitch tells you something</h2>
@@ -166,7 +255,7 @@ function viewHome() {
     </li>`;
   }).join('');
   return `<main class="page">
-    <header class="top"><h1>${esc(CONFIG.appName)}</h1><a class="icon-btn" href="#/settings" aria-label="Settings">⚙</a></header>
+    <header class="top"><h1>${esc(CONFIG.appName)}</h1></header>
     ${seasonCard()}
     <a class="btn primary huge" href="#/new">New game</a>
     ${backupDue() ? `<section class="nudge"><span><b>Back up your season</b><small>${loggedGames() - (db.prefs.backupGames || 0)} games since your last backup. They only live on this phone.</small></span>
@@ -600,7 +689,7 @@ function viewSettings() {
   const install = standalone ? '' : installPrompt
     ? '<button class="btn secondary block" data-act="install">Install on this phone</button>'
     : '<p class="hint">To install: on iPhone tap Share, then “Add to Home Screen”. On Android tap ⋮, then “Install app”.</p>';
-  return `<main class="page">${backHeader('Settings')}
+  return `<main class="page"><header class="top"><h1>Settings</h1></header>
     ${proRow}
     <h2 class="section">Your data</h2>
     <p class="muted small">${db.games.length} game${db.games.length === 1 ? '' : 's'} · ${n} pitches, stored only on this phone.</p>
@@ -622,6 +711,19 @@ document.addEventListener('click', (e) => {
   const act = el.dataset.act;
   const g = getGame(route().id);
   switch (act) {
+    case 'back': // return to wherever the person came from; the href is the fallback
+      if (history.length > 1) { e.preventDefault(); history.back(); }
+      break;
+    case 'open-player':
+      ui.player = { name: el.dataset.player || '', season: el.dataset.season || '' };
+      break; // the link itself navigates
+    case 'pick-player':
+      ui.player = { name: el.dataset.player, season: '' }; ui.heatPick = null; ui.sprayPick = null;
+      render(); break;
+    case 'share-player':
+      ui.report = { player: ui.player.name, season: ui.player.season, game: 'all' };
+      if (!ui.busy) { ui.busy = true; shareReport().catch(() => showToast('Could not share the report')).finally(() => { ui.busy = false; }); }
+      break;
     case 'open-season':
       ui.report = { player: el.dataset.player || 'all', season: el.dataset.season || 'all', game: 'all' };
       break; // the link itself navigates
@@ -725,7 +827,9 @@ document.addEventListener('click', (e) => {
 
 document.addEventListener('change', (e) => {
   const t = e.target;
-  if (t.dataset.filter) {
+  if (t.dataset.playerSeason) {
+    ui.player.season = t.value; ui.heatPick = null; ui.sprayPick = null; render();
+  } else if (t.dataset.filter) {
     ui.report[t.dataset.filter] = t.value;
     if (t.dataset.filter !== 'game') ui.report.game = 'all';
     ui.heatPick = null; ui.sprayPick = null;

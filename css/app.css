@@ -391,3 +391,40 @@ td.is-small { color: var(--muted); }
 .scale-key { display: flex; align-items: center; gap: 10px; margin-top: 24px; font-size: .75rem; color: var(--muted); }
 .scale-key i { flex: 1; height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--div-lo), var(--div-mid), var(--div-hi)); }
 .scale-key + h2.section { margin-top: 20px; }
+
+/* ---------- tab bar ---------- */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: flex; justify-content: space-around;
+  background: var(--surface); border-top: 1px solid var(--line); padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+}
+.tab { flex: 1; max-width: 160px; display: grid; justify-items: center; gap: 2px; padding: 4px 0; font-size: .72rem; font-weight: 600; color: var(--muted); }
+.tab svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tab.on { color: var(--accent); }
+body[data-tabs="1"] .page { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+body[data-tabs="1"] .toast { top: max(8px, env(safe-area-inset-top)); }
+
+/* ---------- player page ---------- */
+.pl-head h2 { font-size: 2rem; letter-spacing: -.03em; margin: 4px 0 2px; }
+.pl-head p { margin: 0; font-size: .9rem; }
+.season-pick { margin-top: 10px; font: inherit; font-size: .9rem; min-height: 40px; padding: 0 12px; border-radius: 10px; border: 0; background: var(--fill); color: var(--text); }
+.chips-row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; }
+.chipbtn { flex: none; min-height: 40px; padding: 0 16px; border-radius: 999px; border: 0; background: var(--fill); font-weight: 600; cursor: pointer; }
+.chipbtn.sel { background: var(--text); color: var(--bg); }
+.tiles { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; margin-top: 8px; }
+.tiles > div { display: grid; justify-items: center; gap: 2px; padding: 10px 4px; border-radius: 14px; background: var(--fill); }
+.tiles b { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.tiles span { font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.tiles.big { margin-top: 16px; }
+.tiles.big > div { padding: 16px 4px; background: var(--surface); box-shadow: var(--shadow); }
+.tiles.big b { font-size: 1.7rem; letter-spacing: -.02em; }
+.tiles.big.is-small b { color: var(--text-2); }
+.card { background: var(--surface); border-radius: 18px; box-shadow: var(--shadow); padding: 14px 16px 6px; }
+.scale-key.in-card { margin: 0 0 6px; }
+.prow { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; padding: 10px 0 4px; }
+.prow + .prow { border-top: 1px solid var(--line); }
+.prow-label { font-weight: 500; }
+.prow-label small { margin-left: 8px; font-size: .78rem; color: var(--muted); font-weight: 400; }
+.prow-val { font-size: 1.1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.prow.is-small .prow-val { color: var(--text-2); font-weight: 600; }
+.prow .meter { margin: 8px 0 8px; }
+.player .list .chev { padding-left: 12px; }
