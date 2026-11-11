@@ -312,20 +312,31 @@ function filteredGames() {
     && (f.game === 'all' || g.id === f.game));
 }
 
-// Blue (needs work) -> gray -> red (great), like a scouting slider. Small samples stay gray.
+// Colors are mixed here in plain JS (not CSS color-mix) so they also work on older phones.
+const isDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
+function mixHex(a, b, t) {
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+  return `#${pa.map((v, i) => Math.round(v + (pb[i] - v) * t).toString(16).padStart(2, '0')).join('')}`;
+}
+// Blue (needs work) -> gray -> red (great), like a scouting slider.
 function scaleColor(t) {
-  return t < 0.5
-    ? `color-mix(in oklab, var(--div-mid) ${Math.round(t * 200)}%, var(--div-lo))`
-    : `color-mix(in oklab, var(--div-hi) ${Math.round((t - 0.5) * 200)}%, var(--div-mid))`;
+  const [lo, mid, hi] = isDark() ? ['#3987e5', '#6f6e68', '#e66767'] : ['#2a78d6', '#b9b7af', '#e34948'];
+  return t < 0.5 ? mixHex(lo, mid, t * 2) : mixHex(mid, hi, (t - 0.5) * 2);
+}
+function heatColor(t) {
+  const [lo, hi] = isDark() ? ['#1f2a3a', '#9ec5f4'] : ['#e3eefb', '#0d366b'];
+  return mixHex(lo, hi, 0.12 + t * 0.88);
 }
 function statRow(key, label, m, def, fmt = pct) {
   const n = !m.den ? 'No data' : fmt === pct ? `${m.num} of ${m.den}` : `${m.den} PA`;
   const small = m.small && m.den;
+  const tiny = m.den < 5; // too few to even hint at a rating
   const t = scaleScore(key, m);
   const word = t == null ? '' : t >= 0.8 ? 'Great' : t >= 0.6 ? 'Good' : t > 0.4 ? 'Average' : t > 0.2 ? 'Below average' : 'Needs work';
-  const bar = t == null ? '' : `<span class="meter ${small ? 'is-small' : ''}" role="img" aria-label="${small ? 'Too few pitches to rate' : word}" style="--t:${(t * 100).toFixed(0)}%;--c:${small ? 'var(--div-mid)' : scaleColor(t)}"><i></i><b></b></span>`;
+  const bar = t == null ? '' : `<span class="meter ${small ? 'is-small' : ''}" role="img" aria-label="${tiny ? 'Too few pitches to rate' : small ? `Early read: ${word}` : word}" style="--t:${(t * 100).toFixed(0)}%;--c:${tiny ? 'var(--div-mid)' : scaleColor(t)}"><i></i><b></b></span>`;
   return `<details class="stat ${small ? 'is-small' : ''}"><summary>
-    <span class="stat-label">${label}<small>${n}${small ? ' · small sample' : t != null ? ` · ${word.toLowerCase()}` : ''}</small></span>
+    <span class="stat-label">${label}<small>${n}${small ? ` · ${tiny ? 'too few to rate' : `early read${t != null ? `: ${word.toLowerCase()}` : ''}`}` : t != null ? ` · ${word.toLowerCase()}` : ''}</small></span>
     <span class="stat-val">${fmt(m.value)}</span>${bar}</summary>
     <p class="stat-def">${def}</p></details>`;
 }
@@ -403,7 +414,7 @@ function viewReport() {
     ${viewSpray(rep, games)}` : viewUpsell()}
 
     ${single ? `<h2 class="section">Pitch by pitch</h2>${viewPALog(rep.allPAs)}` : ''}
-    <p class="footnote">Gray bars and faded numbers have too few pitches behind them to rate yet. The blue-to-red scale is a general guide for youth hitters, not a ranking against other players. Tap any stat for its definition. In zone = Heart + Edge.</p>
+    <p class="footnote">“Early read” means there aren't many pitches behind a number yet, so it can swing a lot from game to game. The blue-to-red scale is a general guide for youth hitters, not a ranking against other players. Tap any stat for its definition. In zone = Heart + Edge.</p>
   </main>`;
 }
 
@@ -507,7 +518,7 @@ function viewHeat(rep) {
     const r = Math.floor(i / GRID), c = i % GRID;
     const t = x.v == null ? null : x.v / max;
     const small = x.den < MIN_N.heatCell;
-    const fill = t == null || (mode === 'seen' && !x.v) ? 'var(--heat-empty)' : `color-mix(in oklab, var(--heat-hi) ${Math.round(12 + t * 88)}%, var(--heat-lo))`;
+    const fill = t == null || (mode === 'seen' && !x.v) ? 'var(--heat-empty)' : heatColor(t);
     return `<g class="hcell ${t != null && t > 0.55 ? 'hot' : ''} ${small && x.den ? 'small' : ''} ${ui.heatPick === i ? 'picked' : ''}" data-act="heat-pick" data-i="${i}">
       <rect x="${c * cw + gap / 2}" y="${r * ch + gap / 2}" width="${cw - gap}" height="${ch - gap}" rx="4" fill="${fill}"/>
       <text x="${c * cw + cw / 2}" y="${r * ch + ch / 2 + 5}" text-anchor="middle">${x.text}</text></g>`;
@@ -761,6 +772,7 @@ document.addEventListener('submit', (e) => {
 
 // Data changed in another tab: reload it.
 window.addEventListener('storage', (e) => { if (e.key === 'atbatlog.v1') { db = store.load(); render(); } });
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => render());
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; if (route().view === 'settings') render(); });
 
 // ---------- boot ----------

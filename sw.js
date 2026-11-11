@@ -1,6 +1,6 @@
 // Offline support: precache the app shell, serve from cache, refresh in background.
 // Bump VERSION whenever you deploy changes so phones pick them up.
-const VERSION = 'atbat-v6';
+const VERSION = 'atbat-v7';
 const ASSETS = [
   './', './index.html', './css/app.css',
   './js/app.js', './js/stats.js', './js/store.js', './js/field.js', './js/config.js', './js/pro.js', './js/share.js', './privacy.html',
