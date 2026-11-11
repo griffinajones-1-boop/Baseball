@@ -428,3 +428,12 @@ body[data-tabs="1"] .toast { top: max(8px, env(safe-area-inset-top)); }
 .prow.is-small .prow-val { color: var(--text-2); font-weight: 600; }
 .prow .meter { margin: 8px 0 8px; }
 .player .list .chev { padding-left: 12px; }
+
+/* ---------- hot/cold heat map ---------- */
+.hcell.hotw text { fill: #ffffff; }
+.seg { padding: 0 2px; }
+.heat-key { margin-top: 10px; font-variant-numeric: tabular-nums; }
+.scale-key i.hotcold { background: linear-gradient(90deg, var(--div-lo), var(--heat-empty), var(--div-hi)); }
+.hcell.small { opacity: 1; }
+.hcell.small rect { opacity: .4; }
+.hcell.small text, .hcell.small.hot text, .hcell.small.hotw text { fill: var(--heat-text); opacity: .75; }

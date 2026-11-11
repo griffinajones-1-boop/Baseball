@@ -17,7 +17,7 @@ const ui = {
   menu: false,
   report: { player: 'all', season: 'all', game: 'all' },
   player: { name: '', season: '' },
-  heat: 'seen',
+  heat: 'avg',
   heatPick: null,
   sprayPick: null,
   toast: null,
@@ -191,7 +191,7 @@ function viewPlayer() {
     <p class="hint">A general guide for youth hitters, not a ranking against other players. Hollow markers are early reads.</p>
 
     ${deep ? `
-    <h2 class="section">Where the pitches are</h2>
+    <h2 class="section">Hot and cold zones</h2>
     ${viewHeat(rep)}
     <h2 class="section">Where the ball goes</h2>
     ${viewSpray(rep, games)}` : viewUpsell()}
@@ -594,33 +594,53 @@ function viewSplits(sp) {
     <p class="hint">Ahead = more balls than strikes. Even includes 0-0 and 3-2. “PA ended” and AVG use the count before the last pitch.</p>`;
 }
 
+// Blue (low) -> pale -> red (high) for batting average and hard contact by location.
+function hotColdColor(t) {
+  const [lo, mid, hi] = isDark() ? ['#3987e5', '#3a3a37', '#e66767'] : ['#2a78d6', '#e9e7e1', '#e34948'];
+  return t < 0.5 ? mixHex(lo, mid, t * 2) : mixHex(mid, hi, (t - 0.5) * 2);
+}
+const HEAT_MODES = {
+  avg: { label: 'AVG', hotCold: true, lo: 0.1, hi: 0.4, min: 'heatAB',
+    get: (c) => ({ v: c.ab ? c.hits / c.ab : null, den: c.ab, text: c.ab ? rate3(c.hits / c.ab) : '' }) },
+  hard: { label: 'Hard hit', hotCold: true, lo: 0.15, hi: 0.5, min: 'heatAB',
+    get: (c) => ({ v: c.bip ? c.hard / c.bip : null, den: c.bip, text: c.bip ? pct(c.hard / c.bip) : '' }) },
+  seen: { label: 'Pitches', min: 'heatCell', get: (c) => ({ v: c.seen || null, den: c.seen, text: c.seen ? String(c.seen) : '' }) },
+  swing: { label: 'Swing', min: 'heatCell', get: (c) => ({ v: c.seen ? c.swings / c.seen : null, den: c.seen, text: c.seen ? pct(c.swings / c.seen) : '' }) },
+  whiff: { label: 'Whiff', min: 'heatCell', get: (c) => ({ v: c.swings ? c.whiffs / c.swings : null, den: c.swings, text: c.swings ? pct(c.whiffs / c.swings) : '' }) },
+};
+
 function viewHeat(rep) {
-  const mode = ui.heat;
+  const mode = HEAT_MODES[ui.heat] ? ui.heat : 'avg';
+  const M = HEAT_MODES[mode];
   const cw = 44, ch = 50, gap = 2;
-  const vals = rep.heat.map((c) => {
-    if (mode === 'seen') return { v: c.seen, den: c.seen, text: c.seen ? String(c.seen) : '' };
-    if (mode === 'swing') return { v: c.seen ? c.swings / c.seen : null, den: c.seen, text: c.seen ? pct(c.swings / c.seen) : '' };
-    return { v: c.swings ? c.whiffs / c.swings : null, den: c.swings, text: c.swings ? pct(c.whiffs / c.swings) : '' };
-  });
+  const vals = rep.heat.map(M.get);
   const max = mode === 'seen' ? Math.max(1, ...vals.map((x) => x.v || 0)) : 1;
+  const any = vals.some((x) => x.v != null);
   const cells = vals.map((x, i) => {
     const r = Math.floor(i / GRID), c = i % GRID;
-    const t = x.v == null ? null : x.v / max;
-    const small = x.den < MIN_N.heatCell;
-    const fill = t == null || (mode === 'seen' && !x.v) ? 'var(--heat-empty)' : heatColor(t);
-    return `<g class="hcell ${t != null && t > 0.55 ? 'hot' : ''} ${small && x.den ? 'small' : ''} ${ui.heatPick === i ? 'picked' : ''}" data-act="heat-pick" data-i="${i}">
+    const t = x.v == null ? null : M.hotCold ? Math.min(1, Math.max(0, (x.v - M.lo) / (M.hi - M.lo))) : x.v / max;
+    const small = x.den < MIN_N[M.min];
+    const fill = t == null ? 'var(--heat-empty)' : M.hotCold ? hotColdColor(t) : heatColor(t);
+    const strong = t != null && (M.hotCold ? Math.abs(t - 0.5) > 0.28 : t > 0.55);
+    return `<g class="hcell ${strong ? (M.hotCold ? 'hotw' : 'hot') : ''} ${small && x.den ? 'small' : ''} ${ui.heatPick === i ? 'picked' : ''}" data-act="heat-pick" data-i="${i}">
       <rect x="${c * cw + gap / 2}" y="${r * ch + gap / 2}" width="${cw - gap}" height="${ch - gap}" rx="4" fill="${fill}"/>
       <text x="${c * cw + cw / 2}" y="${r * ch + ch / 2 + 5}" text-anchor="middle">${x.text}</text></g>`;
   }).join('');
   const pick = ui.heatPick != null ? rep.heat[ui.heatPick] : null;
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : (w.endsWith('h') ? 'es' : 's')}`;
   const caption = pick
-    ? `<b>${esc(locName(ui.heatPick))}</b>: ${pick.seen} pitch${pick.seen === 1 ? '' : 'es'}, ${pick.swings} swing${pick.swings === 1 ? '' : 's'}${pick.seen ? ` (${pct(pick.swings / pick.seen)})` : ''}, ${pick.whiffs} whiff${pick.whiffs === 1 ? '' : 's'}${pick.seen < MIN_N.heatCell && pick.seen ? ' · small sample' : ''}`
-    : 'Catcher’s view. Tap a box for details.';
-  const tab = (k, l) => `<button class="seg ${mode === k ? 'sel' : ''}" data-act="heat-mode" data-v="${k}">${l}</button>`;
-  return `<div class="segs">${tab('seen', 'Pitches seen')}${tab('swing', 'Swing %')}${tab('whiff', 'Whiff %')}</div>
+    ? `<b>${esc(locName(ui.heatPick))}</b>: ${plural(pick.seen, 'pitch')}, ${plural(pick.swings, 'swing')}, ${plural(pick.whiffs, 'whiff')}${pick.ab ? ` · ${pick.hits}-for-${pick.ab} (${rate3(pick.hits / pick.ab)})` : ''}${pick.bip ? ` · ${pick.hard} of ${pick.bip} hit hard` : ''}`
+    : !any && M.hotCold ? 'No at-bats have ended on a located pitch yet.' : 'Catcher’s view. Tap a box for details.';
+  const tab = (k) => `<button class="seg ${mode === k ? 'sel' : ''}" data-act="heat-mode" data-v="${k}">${HEAT_MODES[k].label}</button>`;
+  const key = M.hotCold
+    ? `<div class="scale-key heat-key" aria-hidden="true"><span>${mode === 'avg' ? rate3(M.lo) : pct(M.lo)}</span><i class="hotcold"></i><span>${mode === 'avg' ? rate3(M.hi) : pct(M.hi)}</span></div>` : '';
+  const explain = mode === 'avg' ? 'Batting average on at-bats that ended on a pitch in each spot (balls in play and strike three).'
+    : mode === 'hard' ? 'Share of balls in play from each spot that were hit hard.' : '';
+  return `<div class="segs">${Object.keys(HEAT_MODES).map(tab).join('')}</div>
     <div class="heat-wrap"><svg class="heat" viewBox="0 0 ${cw * GRID} ${ch * GRID}" role="img" aria-label="Zone heat map, catcher's view">
-      ${cells}<rect class="sz" x="${cw}" y="${ch}" width="${cw * 3}" height="${ch * 3}" rx="3"/></svg></div>
+      ${cells}<rect class="sz" x="${cw}" y="${ch}" width="${cw * 3}" height="${ch * 3}" rx="3"/></svg>${key}</div>
     <p class="hint heat-caption">${caption}</p>
+    ${explain ? `<p class="hint center">${explain} Faded boxes have fewer than ${MIN_N.heatAB}.</p>` : ''}
     ${rep.noLoc ? `<p class="hint center">${rep.noLoc} pitch${rep.noLoc === 1 ? '' : 'es'} logged without a location</p>` : ''}`;
 }
 

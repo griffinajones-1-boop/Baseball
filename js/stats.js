@@ -24,7 +24,7 @@ export const PA_RESULTS = {
 export const MIN_N = {
   chase: 25, zoneSwing: 25, heartTake: 15, firstPitchSwing: 10, whiff: 20,
   zoneContact: 15, swStr: 30, twoStrikeChase: 15, kRate: 15, pPerPA: 10,
-  slash: 15, hardHit: 10, split: 15, heatCell: 5,
+  slash: 15, hardHit: 10, split: 15, heatCell: 5, heatAB: 3,
 };
 
 export const isSwing = (r) => r === 'SS' || r === 'F' || r === 'IP';
@@ -184,7 +184,7 @@ export function buildReport(games) {
   }
 
   // Heat map cells (5x5).
-  const heat = Array.from({ length: GRID * GRID }, () => ({ seen: 0, swings: 0, whiffs: 0, takes: 0 }));
+  const heat = Array.from({ length: GRID * GRID }, () => ({ seen: 0, swings: 0, whiffs: 0, takes: 0, ab: 0, hits: 0, bip: 0, hard: 0 }));
   let noLoc = 0;
   for (const p of pitches) {
     if (p.loc == null) { noLoc++; continue; }
@@ -192,6 +192,12 @@ export function buildReport(games) {
     c.seen++;
     if (isSwing(p.result)) c.swings++; else c.takes++;
     if (p.result === 'SS') c.whiffs++;
+    // At-bats that ended on a pitch here: balls in play, plus strike three.
+    if (p.result === 'IP') {
+      c.ab++;
+      if (HITS.has(p.outcome)) c.hits++;
+      if (p.contact) { c.bip++; if (p.contact === 'hard') c.hard++; }
+    } else if ((p.result === 'SS' || p.result === 'CS') && p.strikes === 2) c.ab++;
   }
 
   const outcomes = {};

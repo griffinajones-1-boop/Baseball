@@ -108,3 +108,16 @@ test('scale: direction, clamping and stats without a scale', () => {
   assert.equal(scaleScore('firstPitchSwing', metric(5, 10, 10)), null);
   assert.equal(scaleScore('chase', metric(0, 0, 25)), null);
 });
+
+test('heat map: batting average and hard contact by location', () => {
+  const g = game([
+    P('IP', 'heart', { loc: 12, outcome: '1B', contact: 'hard' }),
+    P('IP', 'heart', { loc: 12, outcome: 'OUT', contact: 'weak' }),
+    P('CS', 'heart', { loc: 12 }), P('SS', 'heart', { loc: 12 }), P('SS', 'chase', { loc: 0 }), // strikeout ends at loc 0
+    P('F', 'edge', { loc: 7 }),
+  ]);
+  const h = buildReport([g]).heat;
+  assert.deepEqual([h[12].ab, h[12].hits, h[12].bip, h[12].hard], [2, 1, 2, 1]);
+  assert.deepEqual([h[0].ab, h[0].hits], [1, 0]);
+  assert.equal(h[7].ab, 0);
+});
