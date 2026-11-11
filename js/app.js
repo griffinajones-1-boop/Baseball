@@ -85,6 +85,70 @@ function describePA(pa) {
 }
 const backHeader = (title, href = '#/', right = '<span class="spacer"></span>') => `<header class="top"><a class="icon-btn" href="${href}" data-act="back" aria-label="Back">‹</a><h1>${title}</h1>${right}</header>`;
 
+// ---------- add to home screen ----------
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+function platform() {
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const inApp = /FBAN|FBAV|FB_IAB|Instagram|Line\/|Snapchat|TikTok|musical_ly|GSA\//.test(ua);
+  const android = /Android/.test(ua);
+  if (inApp) return ios ? 'ios-inapp' : 'android-inapp';
+  if (ios) return /CriOS|FxiOS|EdgiOS|OPiOS/.test(ua) ? 'ios-other' : 'ios-safari';
+  if (android) return 'android';
+  return window.matchMedia('(pointer: coarse)').matches ? 'other-mobile' : 'desktop';
+}
+const pitchesLogged = () => db.games.reduce((a, g) => a + g.events.filter((e) => e.type === 'pitch').length, 0);
+// Offer install only on phones, only once there's something worth keeping, and not after "don't show again".
+const installOffer = () => !isStandalone() && platform() !== 'desktop' && pitchesLogged() >= 3 && !db.prefs.installDismissed;
+
+const SHARE_ICON = '<svg class="ico" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 15V3m0 0L8 7m4-4 4 4M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/></svg>';
+const PLUS_ICON = '<svg class="ico" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></svg>';
+const DOTS_ICON = '<svg class="ico" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg>';
+
+function installSteps() {
+  const p = platform();
+  const host = esc(location.host);
+  if (p === 'ios-inapp' || p === 'android-inapp') {
+    return `<ol class="isteps">
+      <li><span class="inum">1</span><span>You're inside another app's browser. Tap <b>⋯</b> (usually top right) and choose <b>Open in ${p === 'ios-inapp' ? 'Safari' : 'browser'}</b>.</span></li>
+      <li><span class="inum">2</span><span>Then come back here and follow the steps for your phone.</span></li></ol>`;
+  }
+  if (p === 'ios-safari') {
+    return `<ol class="isteps">
+      <li><span class="inum">1</span><span>Tap the <b>Share</b> button ${SHARE_ICON} in Safari's toolbar.</span></li>
+      <li><span class="inum">2</span><span>Scroll down and tap <b>Add to Home Screen</b> ${PLUS_ICON}</span></li>
+      <li><span class="inum">3</span><span>Tap <b>Add</b>. Then open ${esc(CONFIG.appName)} from your home screen from now on.</span></li></ol>`;
+  }
+  if (p === 'ios-other') {
+    return `<ol class="isteps">
+      <li><span class="inum">1</span><span>Tap the <b>Share</b> button ${SHARE_ICON} (in Chrome it's at the top, next to the address).</span></li>
+      <li><span class="inum">2</span><span>Tap <b>Add to Home Screen</b> ${PLUS_ICON}, then <b>Add</b>.</span></li>
+      <li><span class="inum">3</span><span>Don't see it? Open <b>${host}</b> in Safari and add it from there.</span></li></ol>`;
+  }
+  if (installPrompt) {
+    return `<button class="btn primary block" data-act="install">Install ${esc(CONFIG.appName)}</button>
+      <p class="hint center">It adds an icon to your home screen. No app store needed.</p>`;
+  }
+  return `<ol class="isteps">
+    <li><span class="inum">1</span><span>Tap the browser menu ${DOTS_ICON} (top right in Chrome).</span></li>
+    <li><span class="inum">2</span><span>Tap <b>Install app</b> or <b>Add to Home screen</b>.</span></li>
+    <li><span class="inum">3</span><span>Open ${esc(CONFIG.appName)} from your home screen from now on.</span></li></ol>`;
+}
+
+function viewInstallSheet() {
+  const ios = platform().startsWith('ios');
+  return `<div class="sheet-bg" data-act="install-close"></div>
+  <div class="sheet install-sheet" role="dialog" aria-label="Add to home screen">
+    <div class="sheet-head"><h2>Keep ${esc(CONFIG.appName)} on your home screen</h2><button class="link" data-act="install-close">Close</button></div>
+    <ul class="ibenefits">
+      <li><b>Keeps your games safe.</b> ${ios ? 'Safari can clear saved data from websites you haven\'t opened in about a week. Home-screen apps are exempt.' : 'Your browser is less likely to clear an installed app\'s data.'}</li>
+      <li><b>Works at the field with no signal,</b> full screen, one tap to open.</li>
+    </ul>
+    ${installSteps()}
+    <button class="link block-link" data-act="install-never">Don't show this again</button>
+  </div>`;
+}
+
 // ---------- routing ----------
 function route() {
   const h = location.hash.replace(/^#\/?/, '');
@@ -93,6 +157,10 @@ function route() {
 }
 function go(hash) { location.hash = hash; }
 window.addEventListener('hashchange', () => {
+  const next = route().view;
+  if (ui.lastView === 'game' && next === 'home' && installOffer() && !db.prefs.installShown) {
+    db.prefs.installShown = true; persist(); ui.installSheet = true;
+  }
   ui.ip = null; ui.menu = false; ui.sel = { zone: null, loc: null }; ui.pitchType = null; ui.countKey = '';
   render(); window.scrollTo(0, 0);
 });
@@ -115,8 +183,10 @@ function render() {
   else { html = viewHome(); r.view = 'home'; }
   const tabs = ['home', 'player', 'settings'].includes(r.view);
   if (tabs) html += tabBar(r.view);
+  if (ui.installSheet && tabs) html += viewInstallSheet();
   app.innerHTML = html + `<div id="toast" class="toast ${ui.toast ? 'show' : ''}" role="status" aria-live="polite">${esc(ui.toast || '')}</div>`;
   document.body.dataset.view = r.view;
+  ui.lastView = r.view;
   document.body.dataset.tabs = tabs ? '1' : '0';
 }
 
@@ -261,7 +331,9 @@ function viewHome() {
     <header class="top"><h1>${esc(CONFIG.appName)}</h1></header>
     ${seasonCard()}
     <a class="btn primary huge" href="#/new">New game</a>
-    ${backupDue() ? `<section class="nudge"><span><b>Back up your season</b><small>${loggedGames() - (db.prefs.backupGames || 0)} games since your last backup. They only live on this phone.</small></span>
+    ${installOffer() ? `<section class="nudge"><span><b>Add to your home screen</b><small>Keeps your games safe and works at the field with no signal.</small></span>
+      <span class="nudge-actions"><button class="link" data-act="install-never">Not now</button><button class="btn primary" data-act="install-open">Show me how</button></span></section>`
+    : backupDue() ? `<section class="nudge"><span><b>Back up your season</b><small>${loggedGames() - (db.prefs.backupGames || 0)} games since your last backup. They only live on this phone.</small></span>
       <span class="nudge-actions"><button class="link" data-act="backup-later">Later</button><button class="btn primary" data-act="backup">Save backup</button></span></section>` : ''}
     <h2 class="section">Games</h2>
     <ul class="list">${list}</ul>
@@ -725,10 +797,8 @@ function viewPro() {
 function viewSettings() {
   const n = db.games.reduce((a, g) => a + g.events.filter((e) => e.type === 'pitch').length, 0);
   const proRow = !pro.proEnabled() ? '' : `<a class="row-link" href="#/pro"><span><b>${esc(CONFIG.appName)} Pro</b><small>${pro.isPro() ? 'Active on this phone' : 'The full season view'}</small></span><span class="chev">›</span></a>`;
-  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-  const install = standalone ? '' : installPrompt
-    ? '<button class="btn secondary block" data-act="install">Install on this phone</button>'
-    : '<p class="hint">To install: on iPhone tap Share, then “Add to Home Screen”. On Android tap ⋮, then “Install app”.</p>';
+  const install = isStandalone() ? '<p class="hint">Installed on this phone.</p>'
+    : '<button class="btn secondary block" data-act="install-open">Add to home screen</button>';
   return `<main class="page"><header class="top"><h1>Settings</h1></header>
     ${proRow}
     <h2 class="section">Logging</h2>
@@ -857,8 +927,16 @@ document.addEventListener('click', (e) => {
         persist(); showToast('All data erased'); go('#/');
       }
       break;
+    case 'install-open': ui.installSheet = true; render(); break;
+    case 'install-close': ui.installSheet = false; render(); break;
+    case 'install-never':
+      db.prefs.installDismissed = true; persist(); ui.installSheet = false; render(); break;
     case 'install':
-      if (installPrompt) { installPrompt.prompt(); installPrompt = null; render(); }
+      if (installPrompt) {
+        installPrompt.prompt();
+        installPrompt.userChoice?.then((c) => { if (c.outcome === 'accepted') { ui.installSheet = false; render(); } });
+        installPrompt = null; render();
+      }
       break;
     case 'buy': {
       const plan = CONFIG.pro.plans.find((p) => p.id === el.dataset.plan);
@@ -926,7 +1004,8 @@ document.addEventListener('submit', (e) => {
 // Data changed in another tab: reload it.
 window.addEventListener('storage', (e) => { if (e.key === 'atbatlog.v1') { db = store.load(); render(); } });
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => render());
-window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; if (route().view === 'settings') render(); });
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; if (ui.installSheet || route().view === 'settings') render(); });
+window.addEventListener('appinstalled', () => { installPrompt = null; ui.installSheet = false; showToast('Installed. Open it from your home screen.', 3500); render(); });
 
 // ---------- boot ----------
 async function boot() {
