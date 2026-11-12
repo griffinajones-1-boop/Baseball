@@ -2,7 +2,7 @@
 const KEY = 'atbatlog.v1';
 
 function empty() {
-  return { version: 1, games: [], prefs: { lastPlayer: '' } };
+  return { version: 1, games: [], players: {}, prefs: { lastPlayer: '' } };
 }
 
 export function load() {
@@ -12,6 +12,7 @@ export function load() {
     const data = JSON.parse(raw);
     if (!Array.isArray(data.games)) return empty();
     data.prefs = data.prefs || { lastPlayer: '' };
+    data.players = data.players || {};
     return data;
   } catch (e) {
     console.error('Could not read saved data', e);
@@ -37,6 +38,7 @@ export function parseBackup(text) {
     if (!g.id || !Array.isArray(g.events)) throw new Error('Backup file has a malformed game');
   }
   data.prefs = data.prefs || { lastPlayer: '' };
+  data.players = data.players || {};
   data.version = 1;
   return data;
 }

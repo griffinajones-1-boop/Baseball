@@ -12,12 +12,15 @@ import * as usage from './usage.js';
 import { sendFeedback, flushFeedback } from './feedback.js';
 
 let db = store.load();
+db.players = db.players || {};
 let installPrompt = null; // Android/desktop "install app" event
 const ui = {
   sel: { zone: null, loc: null },
   pitchType: null, // optional: FB / BR / CH for the pitch being logged
   heatType: 'all',
   feedback: null, // { kind, sending } while the feedback sheet is open
+  playerEdit: null, // name of the player being edited
+  zoneHelp: false,
   ip: null, // in-play sheet state
   menu: false,
   report: { player: 'all', season: 'all', game: 'all' },
@@ -47,6 +50,8 @@ const fmtDate = (iso, withYear = true) => {
 };
 const getGame = (id) => db.games.find((g) => g.id === id);
 const sortedGames = () => [...db.games].sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.createdAt - a.createdAt);
+const profile = (name) => db.players[name] || {};
+const batsOf = (name) => profile(name).bats || null;
 const players = () => [...new Set(db.games.map((g) => g.player).filter(Boolean))].sort();
 const seasons = () => [...new Set(db.games.map((g) => (g.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
 function persist() {
@@ -219,7 +224,7 @@ function route() {
 function go(hash) { location.hash = hash; }
 window.addEventListener('hashchange', () => {
   const next = route().view;
-  ui.feedback = null;
+  ui.feedback = null; ui.playerEdit = null; ui.zoneHelp = false;
   if (ui.lastView === 'game' && next === 'home' && installOffer() && !db.prefs.installShown) {
     db.prefs.installShown = true; persist(); ui.installSheet = true;
   }
@@ -242,11 +247,15 @@ function render() {
   } else if (r.view === 'settings') html = viewSettings();
   else if (r.view === 'pro' && pro.proEnabled()) html = viewPro();
   else if (r.view === 'player') html = viewPlayer();
+  else if (r.view === 'fix' && getGame(r.id)) html = viewFix(getGame(r.id));
+  else if (r.view === 'summary' && getGame(r.id)) html = viewSummary(getGame(r.id));
+  else if (r.view === 'help') html = viewHelp();
   else { html = viewHome(); r.view = 'home'; }
   const tabs = ['home', 'player', 'settings'].includes(r.view);
   if (tabs) html += tabBar(r.view);
   if (ui.installSheet && tabs) html += viewInstallSheet();
   if (ui.feedback) html += viewFeedbackSheet();
+  if (ui.playerEdit != null && r.view === 'player') html += viewPlayerEdit();
   app.innerHTML = html + `<div id="toast" class="toast ${ui.toast ? 'show' : ''}" role="status" aria-live="polite">${esc(ui.toast || '')}</div>`;
   document.body.dataset.view = r.view;
   ui.lastView = r.view;
@@ -310,7 +319,8 @@ function viewPlayer() {
     <header class="top"><h1>Player</h1>${rep.pitchCount ? '<button class="link share-btn" data-act="share-player">Share</button>' : ''}</header>
     ${chips}
     <section class="pl-head">
-      <h2>${esc(ui.player.name)}</h2>
+      <div class="pl-name"><h2>${esc(ui.player.name)}${profile(ui.player.name).number ? ` <span class="pl-num">#${esc(profile(ui.player.name).number)}</span>` : ''}</h2><button class="link" data-act="player-edit">Edit</button></div>
+      ${batsOf(ui.player.name) ? `<p class="muted">Bats ${{ R: 'right', L: 'left', S: 'both sides' }[batsOf(ui.player.name)]}</p>` : '<p class="muted"><button class="link inline" data-act="player-edit">Add which side they bat from</button></p>'}
       <p class="muted">${years.length > 1 ? '' : `${esc(ui.player.season)} season · `}${games.length} game${games.length === 1 ? '' : 's'} · ${rep.paCount} PA · ${rep.pitchCount} pitches</p>
       ${seasonPick}
     </section>
@@ -329,7 +339,7 @@ function viewPlayer() {
 
     ${lvl() < 2 ? '' : deep ? `
     <h2 class="section">Hot and cold zones</h2>
-    ${viewHeat(rep)}
+    ${viewHeat(rep, batsOf(ui.player.name))}
     ${lvl() >= 3 ? viewByType(rep) : ''}
     <h2 class="section">Where the ball goes</h2>
     ${viewSpray(rep, games)}` : viewUpsell()}
@@ -380,7 +390,7 @@ function viewHome() {
   }
   const list = games.map((g) => {
     const { pas, current } = replayGame(g);
-    const live = current.pitches.length > 0;
+    const live = current.pitches.length > 0 && !g.done;
     const line = gameLine(pas);
     return `<li class="row">
       <a class="row-main" href="#/game/${g.id}">
@@ -439,7 +449,7 @@ function viewLive(g) {
 
   const cells = Array.from({ length: GRID * GRID }, (_, i) => {
     const z = defaultZoneForLoc(i);
-    return `<button class="cell z-${z} ${ui.sel.loc === i ? 'sel' : ''}" data-act="loc" data-loc="${i}" aria-label="${esc(locName(i))}"></button>`;
+    return `<button class="cell z-${z} ${ui.sel.loc === i ? 'sel' : ''}" data-act="loc" data-loc="${i}" aria-label="${esc(locName(i, batsOf(g.player)))}"></button>`;
   }).join('');
   const zoneBtns = ZONES.map((z) => `<button class="zbtn ${ui.sel.zone === z ? 'sel' : ''}" data-act="zone" data-zone="${z}">${ZONE_LABELS[z]}</button>`).join('');
   const resBtns = [
@@ -453,6 +463,7 @@ function viewLive(g) {
       <div class="live-title">${esc(g.player || 'Batter')} <span class="muted">vs ${esc(g.opponent || 'Opp')}</span></div>
       <button class="icon-btn" data-act="menu" aria-label="Game menu">⋯</button>
     </header>
+    ${g.done ? '<button class="done-banner" data-act="resume-game">This game is over. <b>Resume logging</b></button>' : ''}
     <section class="countbar" aria-label="Count ${b} balls ${s} strikes">
       <div class="count-num ${pop}">${b}–${s}</div>
       <div class="count-dots"><div>${dots(b, 3)}</div><div>${dots(s, 2)}</div></div>
@@ -470,6 +481,7 @@ function viewLive(g) {
     <section class="results">${resBtns}</section>
     ${ui.ip ? viewInPlay() : ''}
     ${ui.menu ? viewMenu(g, current) : ''}
+    ${(ui.zoneHelp || (m.zone && !db.prefs.zoneHelpSeen && !ui.menu && !ui.ip)) ? viewZoneHelp() : ''}
   </main>`;
 }
 
@@ -479,7 +491,10 @@ function viewMenu(g, current) {
   return `<div class="sheet-bg" data-act="close-menu"></div>
   <div class="sheet" role="dialog" aria-label="Game menu">
     <div class="sheet-head"><h2>${esc(g.player || 'Batter')} vs ${esc(g.opponent || 'Opp')}</h2><button class="link" data-act="close-menu">Done</button></div>
-    <a class="btn primary block" href="#/report/${g.id}">Game report</a>
+    <div class="optrow two menu-main">
+      <button class="btn primary" data-act="end-game">End game</button>
+      <a class="btn secondary" href="#/report/${g.id}">Game report</a>
+    </div>
     <p class="label">End PA ${current.num} without a pitch</p>
     <div class="optrow two">
       <button class="opt" data-act="end-pa" data-reason="IBB">Intentional walk</button>
@@ -487,7 +502,8 @@ function viewMenu(g, current) {
     </div>
     <p class="hint">“Other” is for a runner out, game over, or a substitution. It isn't counted in the stats.</p>
     ${recent ? `<p class="label">This game</p><ol class="mini-log">${recent}</ol>` : ''}
-    <div class="sheet-links"><a class="link" href="#/edit/${g.id}">Edit game</a><button class="link" data-act="feedback-open">Send feedback</button></div>
+    <div class="sheet-links"><a class="link" href="#/fix/${g.id}">Fix a pitch</a><a class="link" href="#/edit/${g.id}">Edit game</a>${M().zone ? '<button class="link" data-act="zone-help">Zones?</button>' : ''}</div>
+    <div class="sheet-links quiet"><button class="link" data-act="feedback-open">Send feedback</button><a class="link" href="#/help">Help</a></div>
   </div>`;
 }
 
@@ -659,11 +675,11 @@ function viewReport() {
     <h2 class="section">By count</h2>
     ${viewSplits(rep.splits)}` : ''}
     <h2 class="section">Heat map</h2>
-    ${viewHeat(rep)}
+    ${viewHeat(rep, single ? batsOf(single.player) : f.player !== 'all' ? batsOf(f.player) : null)}
     <h2 class="section">Spray chart</h2>
     ${viewSpray(rep, games)}` : viewUpsell()}
 
-    ${single ? `<h2 class="section">Pitch by pitch</h2>${viewPALog(rep.allPAs)}` : ''}
+    ${single ? `<div class="list-head"><h2 class="section">Pitch by pitch</h2><a class="link" href="#/fix/${single.id}">Fix a mistake</a></div>${viewPALog(rep.allPAs)}` : ''}
     <p class="footnote">“Early read” means there aren't many pitches behind a number yet, so it can swing a lot from game to game. The blue-to-red scale is a general guide for youth hitters, not a ranking against other players. Tap any stat for its definition.${lvl() >= 2 ? ' In zone = Heart + Edge.' : ''}</p>
   </main>`;
 }
@@ -774,7 +790,7 @@ const HEAT_MODES = {
   whiff: { label: 'Whiff', min: 'heatCell', get: (c) => ({ v: c.swings ? c.whiffs / c.swings : null, den: c.swings, text: c.swings ? pct(c.whiffs / c.swings) : '' }) },
 };
 
-function viewHeat(rep) {
+function viewHeat(rep, bats = null) {
   const keys = Object.keys(HEAT_MODES).filter((k) => lvl() >= 3 || ['avg', 'hard', 'seen'].includes(k));
   const mode = keys.includes(ui.heat) ? ui.heat : 'avg';
   const M = HEAT_MODES[mode];
@@ -797,7 +813,7 @@ function viewHeat(rep) {
   const pick = ui.heatPick != null ? src.heat[ui.heatPick] : null;
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : (w.endsWith('h') ? 'es' : 's')}`;
   const caption = pick
-    ? `<b>${esc(locName(ui.heatPick))}</b>: ${plural(pick.seen, 'pitch')}, ${plural(pick.swings, 'swing')}, ${plural(pick.whiffs, 'whiff')}${pick.ab ? ` · ${pick.hits}-for-${pick.ab} (${rate3(pick.hits / pick.ab)})` : ''}${pick.bip ? ` · ${pick.hard} of ${pick.bip} hit hard` : ''}`
+    ? `<b>${esc(locName(ui.heatPick, bats))}</b>: ${plural(pick.seen, 'pitch')}, ${plural(pick.swings, 'swing')}, ${plural(pick.whiffs, 'whiff')}${pick.ab ? ` · ${pick.hits}-for-${pick.ab} (${rate3(pick.hits / pick.ab)})` : ''}${pick.bip ? ` · ${pick.hard} of ${pick.bip} hit hard` : ''}`
     : !any && M.hotCold ? 'No at-bats have ended on a located pitch yet.' : 'Catcher’s view. Tap a box for details.';
   const tab = (k) => `<button class="seg ${mode === k ? 'sel' : ''}" data-act="heat-mode" data-v="${k}">${HEAT_MODES[k].label}</button>`;
   const key = M.hotCold
@@ -807,7 +823,8 @@ function viewHeat(rep) {
   const typeChips = !rep.typed || lvl() < 3 ? '' : `<div class="chips-row tight">${[['all', 'All pitches'], ...Object.entries(PITCH_TYPES)].map(([k, v]) => `<button class="chipbtn small ${ui.heatType === k ? 'sel' : ''}" data-act="heat-type" data-v="${k}">${v}</button>`).join('')}</div>`;
   return `<div class="segs">${keys.map(tab).join('')}</div>${typeChips}
     <div class="heat-wrap"><svg class="heat" viewBox="0 0 ${cw * GRID} ${ch * GRID}" role="img" aria-label="Zone heat map, catcher's view">
-      ${cells}<rect class="sz" x="${cw}" y="${ch}" width="${cw * 3}" height="${ch * 3}" rx="3"/></svg>${key}</div>
+      ${cells}<rect class="sz" x="${cw}" y="${ch}" width="${cw * 3}" height="${ch * 3}" rx="3"/></svg>
+      ${bats === 'R' || bats === 'L' ? `<div class="heat-dir"><span>← ${bats === 'R' ? 'Inside' : 'Away'}</span><span>${bats === 'R' ? 'Away' : 'Inside'} →</span></div>` : ''}${key}</div>
     <p class="hint heat-caption">${caption}</p>
     ${explain ? `<p class="hint center">${explain} Faded boxes have fewer than ${MIN_N.heatAB}.</p>` : ''}
     ${src.noLoc ? `<p class="hint center">${src.noLoc} pitch${src.noLoc === 1 ? '' : 'es'} logged without a location</p>` : ''}`;
@@ -852,6 +869,137 @@ function viewPALog(pas) {
   <p class="hint">B ball · K called strike · S swinging strike · F foul · X in play · H hit by pitch</p>`;
 }
 
+// ---------- fix a pitch ----------
+const FIX_RESULTS = ['B', 'CS', 'SS', 'F', 'HBP'];
+function viewFix(g) {
+  const { pas, current } = replayGame(g);
+  const all = current.pitches.length ? [...pas, current] : pas;
+  const pitchRow = (p) => {
+    const sel = p.result === 'IP'
+      ? `<select data-fix-outcome="${p.idx}" aria-label="Result">${Object.entries(OUTCOMES).map(([k, v]) => `<option value="${k}" ${p.outcome === k ? 'selected' : ''}>In play: ${v}</option>`).join('')}</select>`
+      : `<select data-fix-result="${p.idx}" aria-label="Pitch result">${FIX_RESULTS.map((k) => `<option value="${k}" ${p.result === k ? 'selected' : ''}>${RESULTS[k]}</option>`).join('')}</select>`;
+    return `<li class="fix-row"><span class="fix-c">${p.balls}-${p.strikes}</span>${sel}<span class="fix-z muted">${p.zone ? ZONE_LABELS[p.zone] : ''}</span>
+      <button class="icon-btn small" data-act="fix-delete" data-idx="${p.idx}" aria-label="Delete pitch">✕</button></li>`;
+  };
+  const body = all.map((pa) => `<section class="fix-pa">
+    <h3>PA ${pa.num} <span class="muted">${pa.result ? esc(describePA(pa)) : 'in progress'}</span></h3>
+    <ol class="fix-list">${pa.pitches.map(pitchRow).join('')}
+    ${pa.endIdx != null ? `<li class="fix-row"><span class="fix-c"></span><span class="fix-end">Ended: ${esc(PA_RESULTS[pa.result])}</span><span></span><button class="icon-btn small" data-act="fix-delete" data-idx="${pa.endIdx}" aria-label="Remove">✕</button></li>` : ''}</ol>
+  </section>`).join('');
+  return `<main class="page">
+    ${backHeader('Fix a pitch', `#/game/${g.id}`)}
+    <p class="hint">Change a pitch's result or delete it. The count and at-bats recalculate, so later pitches may move into a different at-bat.</p>
+    ${body || '<p class="empty">No pitches yet.</p>'}
+  </main>`;
+}
+
+// ---------- end of game ----------
+function viewSummary(g) {
+  const rep = buildReport([g]);
+  const S = rep.stats;
+  const line = gameLine(rep.allPAs);
+  const hits = rep.allPAs.filter((pa) => HITS.has(pa.result));
+  const rank = { HR: 4, '3B': 3, '2B': 2, '1B': 1 };
+  const best = [...hits].sort((a, b) => rank[b.result] - rank[a.result])[0];
+  const longest = [...rep.allPAs].sort((a, b) => b.pitches.length - a.pitches.length)[0];
+  const swings = rep.pitches.filter((p) => ['SS', 'F', 'IP'].includes(p.result)).length;
+  const moment = best
+    ? `${describePA(best)} in PA ${best.num}${(() => { const lp = best.pitches[best.pitches.length - 1]; return lp ? ` on a ${lp.balls}-${lp.strikes} pitch` : ''; })()}`
+    : longest && longest.pitches.length >= 5 ? `A ${longest.pitches.length}-pitch battle in PA ${longest.num}` : '';
+  const tile = (v, l) => `<div><b>${v}</b><span>${l}</span></div>`;
+  return `<main class="page summary">
+    ${backHeader('Game over', '#/')}
+    <section class="sum-card">
+      <span class="sum-who">${esc(g.player || 'Batter')} vs ${esc(g.opponent || 'Opponent')} · ${esc(fmtDate(g.date, false))}</span>
+      <span class="sum-line">${esc(line || 'No completed at-bats')}</span>
+      ${moment ? `<span class="sum-moment">Best moment: ${esc(moment)}</span>` : ''}
+    </section>
+    <div class="tiles">${tile(rep.paCount, 'PA')}${tile(rep.pitchCount, 'Pitches')}${tile(swings, 'Swings')}${tile(pct(S.whiff.value), 'Miss rate')}</div>
+    <button class="btn primary huge" data-act="share-summary" data-id="${g.id}">Share this game</button>
+    <a class="btn secondary block" href="#/report/${g.id}">Full game report</a>
+    <a class="btn secondary block" href="#/">Back to games</a>
+    <p class="hint center"><button class="link" data-act="resume-game" data-id="${g.id}">Resume logging this game</button></p>
+  </main>`;
+}
+
+// ---------- players ----------
+function viewPlayerEdit() {
+  const name = ui.playerEdit;
+  const pr = profile(name);
+  const opt = (v, l) => `<button type="button" class="seg ${pr.bats === v ? 'sel' : ''}" data-act="pe-bats" data-v="${v}">${l}</button>`;
+  return `<div class="sheet-bg" data-act="pe-close"></div>
+  <div class="sheet" role="dialog" aria-label="Edit player">
+    <div class="sheet-head"><h2>Edit player</h2><button class="link" data-act="pe-close">Cancel</button></div>
+    <form id="player-form" class="form">
+      <label>Name<input name="name" required maxlength="40" autocomplete="off" value="${esc(name)}"></label>
+      <div class="form-field"><span class="form-label">Bats</span><div class="segs">${opt('R', 'Right')}${opt('L', 'Left')}${opt('S', 'Both')}</div>
+        <p class="hint">Lets the heat map say inside and away instead of left and right.</p></div>
+      <label>Jersey number <span class="muted">(optional)</span><input name="number" maxlength="3" inputmode="numeric" value="${esc(pr.number || '')}"></label>
+      <button class="btn primary huge" type="submit">Save</button>
+    </form>
+  </div>`;
+}
+function savePlayer(oldName, { name, number, bats }) {
+  const pr = { ...profile(oldName), number: number || undefined, bats: bats || profile(oldName).bats };
+  if (name !== oldName) {
+    const merging = players().includes(name);
+    if (merging && !confirm(`${name} already exists. Combine ${oldName}'s games into ${name}?`)) return false;
+    for (const g of db.games) if (g.player === oldName) g.player = name;
+    delete db.players[oldName];
+    if (db.prefs.lastPlayer === oldName) db.prefs.lastPlayer = name;
+    db.players[name] = merging ? { ...pr, ...profile(name) } : pr;
+  } else db.players[name] = pr;
+  persist();
+  ui.player.name = name;
+  return true;
+}
+
+// ---------- zone explainer ----------
+function viewZoneHelp() {
+  const z = (cls, label, text) => `<li><i class="zh-sw ${cls}"></i><span><b>${label}</b> ${text}</span></li>`;
+  const cells = Array.from({ length: 25 }, (_, i) => `<i class="cell z-${defaultZoneForLoc(i)}"></i>`).join('');
+  return `<div class="sheet-bg" data-act="zone-help-close"></div>
+  <div class="sheet" role="dialog" aria-label="How zones work">
+    <div class="sheet-head"><h2>How the zones work</h2><button class="link" data-act="zone-help-close">Close</button></div>
+    <div class="zh-wrap"><div class="zh-grid" aria-hidden="true">${cells}<span class="sz-outline"></span></div>
+      <ul class="zh-list">
+        ${z('z-heart', 'Heart:', 'middle of the zone. The pitches to hit.')}
+        ${z('z-edge', 'Edge:', 'the rest of the strike zone, near the corners.')}
+        ${z('z-chase', 'Chase:', 'just off the plate. Tempting, but a ball.')}
+        ${z('z-waste', 'Waste:', 'way off. Nobody should swing.')}
+      </ul></div>
+    <p class="zh-tip">Tap where the pitch crossed the plate, <b>as the catcher sees it</b>. We pick the zone for you; tap a zone button to change it. Close enough is fine.</p>
+    <button class="btn primary huge" data-act="zone-help-close">Got it</button>
+  </div>`;
+}
+
+// ---------- help ----------
+function viewHelp() {
+  const q = (title, body) => `<details class="help-q"><summary>${title}</summary><div>${body}</div></details>`;
+  const stats = Object.values(STAT_DEFS).map(([name, def]) => `<li><b>${name}</b>: ${def}</li>`).join('');
+  return `<main class="page help">
+    ${backHeader('How it works', '#/settings')}
+    <h2 class="section">Logging</h2>
+    ${q('How do I log a pitch?', '<p>In Standard and Advanced, tap where the pitch was on the grid (as the catcher sees it), then what happened. In Basic, just tap what happened. The count, walks, strikeouts and the end of each at-bat happen on their own.</p>')}
+    ${q('I tapped the wrong thing', '<p>Tap <b>Undo</b> to remove the last pitch. For an older pitch, open ⋯ and choose <b>Fix a pitch</b> to change or delete any pitch in the game.</p>')}
+    ${q('What are Heart, Edge, Chase and Waste?', '<p><b>Heart</b> is the middle of the zone, <b>Edge</b> is the rest of the strike zone, <b>Chase</b> is just off the plate and <b>Waste</b> is way off. Swinging at Heart pitches and laying off Chase and Waste is what good hitters do.</p>')}
+    ${q('The at-bat ended without a pitch', '<p>Open ⋯ and choose <b>Intentional walk</b> or <b>Other</b> (a runner out, game over, a substitution). “Other” isn\'t counted in the stats.</p>')}
+    ${q('When the game is over', '<p>Open ⋯ and tap <b>End game</b> for a summary you can share. You can resume a game later if you ended it by mistake.</p>')}
+    ${q('Which mode should I use?', '<p><b>Basic</b> is one tap a pitch, great for younger kids. <b>Standard</b> adds where the pitch was and is right for most parents. <b>Advanced</b> adds pitch type and ball flight. Change it anytime in Settings; nothing is deleted.</p>')}
+    ${q('Can I log a game from video?', '<p>Yes. Start a new game with the date it was played and log while you watch.</p>')}
+    <h2 class="section">The numbers</h2>
+    ${q('What does each stat mean?', `<ul class="help-list">${stats}</ul>`)}
+    ${q('What do the colors mean?', '<p>Sliders run from blue (needs work) to red (great). They\'re a general guide for youth hitters, not a ranking against other players. Hollow markers and faded numbers are “early reads”: too few pitches to trust yet.</p>')}
+    ${q('Inside and away', '<p>On the Player page, tap <b>Edit</b> and choose which side your kid bats from. The heat map then says inside and away instead of left and right.</p>')}
+    ${q('Why is the heat map mostly empty?', '<p>Each box needs a few at-bats ending there before it means much. It fills in over a season.</p>')}
+    <h2 class="section">Your data</h2>
+    ${q('Where are my games stored?', '<p>Only on this phone. Nothing about your kid is uploaded. That also means deleting the app or clearing browser data erases them, so save a backup in Settings now and then.</p>')}
+    ${q('Moving to a new phone', '<p>On the old phone: Settings → <b>Download backup</b>, and send the file to yourself. On the new phone: open the app, then Settings → <b>Restore from backup</b>.</p>')}
+    ${q('Adding it to your home screen', '<p>It keeps your games safe and works with no signal. Settings → <b>Add to home screen</b> shows the steps for your phone.</p>')}
+    <p class="hint center">Still stuck? <button class="link" data-act="feedback-open">Send feedback</button></p>
+  </main>`;
+}
+
 // ---------- Pro ----------
 function viewPro() {
   const st = pro.proState();
@@ -889,6 +1037,7 @@ function viewSettings() {
     : '<button class="btn secondary block" data-act="install-open">Add to home screen</button>';
   return `<main class="page"><header class="top"><h1>Settings</h1></header>
     ${proRow}
+    <a class="row-link fb-row" href="#/help"><span><b>How it works</b><small>Logging, what the stats mean, your data</small></span><span class="chev">›</span></a>
     <button class="row-link fb-row" data-act="feedback-open"><span><b>Send feedback</b><small>Something broken, confusing or missing? Tell us.</small></span><span class="chev">›</span></button>
     <h2 class="section">Mode</h2>
     ${modeSeg()}
@@ -938,6 +1087,46 @@ document.addEventListener('click', (e) => {
       if (ui.sel.loc === loc) ui.sel = { zone: null, loc: null };
       else ui.sel = { loc, zone: defaultZoneForLoc(loc) };
       buzz(6); render(); break;
+    }
+    case 'end-game': {
+      if (!g) break;
+      const cur = replayGame(g).current;
+      if (cur.pitches.length) {
+        if (!confirm(`End the game? The at-bat in progress (${cur.balls}-${cur.strikes}) will be ended with no result.`)) break;
+        g.events.push({ type: 'end', t: Date.now(), reason: 'OTHER' });
+      }
+      g.done = true; persist(); usage.track('game_done');
+      ui.menu = false; go(`#/summary/${g.id}`); break;
+    }
+    case 'resume-game': {
+      const gg = getGame(el.dataset.id || route().id);
+      if (!gg) break;
+      gg.done = false; persist();
+      if (route().view === 'game') render(); else go(`#/game/${gg.id}`);
+      break;
+    }
+    case 'share-summary':
+      ui.report = { player: getGame(el.dataset.id).player || 'all', season: 'all', game: el.dataset.id };
+      if (!ui.busy) { ui.busy = true; shareReport().catch(() => showToast('Could not share the game')).finally(() => { ui.busy = false; }); }
+      break;
+    case 'fix-delete': {
+      const gg = getGame(route().id);
+      const idx = Number(el.dataset.idx);
+      if (!gg || !gg.events[idx]) break;
+      if (!confirm(gg.events[idx].type === 'end' ? 'Remove this at-bat ending?' : 'Delete this pitch?')) break;
+      gg.events.splice(idx, 1); persist(); showToast('Deleted. Counts recalculated.'); render(); break;
+    }
+    case 'zone-help': ui.menu = false; ui.zoneHelp = true; render(); break;
+    case 'zone-help-close': ui.zoneHelp = false; db.prefs.zoneHelpSeen = true; persist(); render(); break;
+    case 'player-edit': ui.playerEdit = ui.player.name; render(); break;
+    case 'pe-close': ui.playerEdit = null; render(); break;
+    case 'pe-bats': {
+      const form = document.getElementById('player-form');
+      const vals = { name: form.elements.name.value, number: form.elements.number.value };
+      db.players[ui.playerEdit] = { ...profile(ui.playerEdit), bats: el.dataset.v }; persist(); render();
+      const f2 = document.getElementById('player-form').elements;
+      f2.name.value = vals.name; f2.number.value = vals.number;
+      break;
     }
     case 'choose-mode':
       setMode(el.dataset.v); usage.track(`start_${el.dataset.v}`); go('#/new'); break;
@@ -1030,7 +1219,7 @@ document.addEventListener('click', (e) => {
       break;
     case 'wipe':
       if (confirm('Erase every game and pitch on this phone? Download a backup first if you might want them.') && confirm('Really erase everything?')) {
-        db = { version: 1, games: [], prefs: { lastPlayer: '' } };
+        db = { version: 1, games: [], players: {}, prefs: { lastPlayer: '' } };
         persist(); showToast('All data erased'); go('#/');
       }
       break;
@@ -1059,7 +1248,14 @@ document.addEventListener('click', (e) => {
 
 document.addEventListener('change', (e) => {
   const t = e.target;
-  if (t.id === 'pref-usage') {
+  if (t.dataset.fixResult || t.dataset.fixOutcome) {
+    const gg = getGame(route().id);
+    const idx = Number(t.dataset.fixResult || t.dataset.fixOutcome);
+    if (gg && gg.events[idx]) {
+      if (t.dataset.fixResult) gg.events[idx].result = t.value; else gg.events[idx].outcome = t.value;
+      persist(); showToast('Updated. Counts recalculated.'); render();
+    }
+  } else if (t.id === 'pref-usage') {
     db.prefs.usage = t.checked; persist();
     if (!t.checked) usage.clearQueue();
   } else if (t.id === 'pref-ptypes') {
@@ -1082,6 +1278,16 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('submit', (e) => {
+  if (e.target.id === 'player-form') {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const name = String(fd.get('name') || '').trim();
+    if (!name) return;
+    if (savePlayer(ui.playerEdit, { name, number: String(fd.get('number') || '').trim(), bats: profile(ui.playerEdit).bats })) {
+      ui.playerEdit = null; showToast('Player saved'); render();
+    }
+    return;
+  }
   if (e.target.id === 'feedback-form') {
     e.preventDefault();
     if (!ui.feedback || ui.feedback.sending) return;

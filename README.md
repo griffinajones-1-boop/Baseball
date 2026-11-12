@@ -23,14 +23,19 @@ Switching never deletes data, only what's logged and shown.
 | Reports | Swing and miss, strikeout rate, pitches per PA | Swing decisions, hot/cold heat map, spray chart | Every stat, count and pitch-type splits |
 
 The count, walks, strikeouts and the end of each plate appearance are automatic. **Undo** removes the
-last pitch. The **⋯** menu ends a PA without a pitch (intentional walk, runner out, game over).
+last pitch; **⋯ → Fix a pitch** changes or deletes any pitch, and everything recalculates. The **⋯** menu
+also ends a PA without a pitch (intentional walk, runner out) and has **End game**, which shows a
+shareable game summary. A one-time explainer covers Heart, Edge, Chase and Waste.
 
 ## Screens
 
 - **Games**: game list, season card, backup and install reminders.
 - **Player**: a scouting-style page with slash line, blue-to-red rating sliders, heat map, spray chart.
+  **Edit** renames a player (or merges a typo into an existing one), sets jersey number and which side
+  they bat from, so the heat map reads inside/away.
 - **Reports**: per game or season, with a **Share** button that makes an image for texting.
-- **Settings**: mode, feedback, export, backup/restore, usage-count opt-out.
+- **Settings**: mode, an in-app help page (How it works), feedback, export, backup/restore,
+  usage-count opt-out.
 
 Rating sliders use fixed cutoffs in `SCALE` in `public/js/stats.js`. They are a general guide set by
 judgment, not percentiles; have a hitting coach review them. "Early read" marks stats with few pitches

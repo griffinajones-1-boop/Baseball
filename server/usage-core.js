@@ -8,6 +8,7 @@ export const EVENTS = {
   start_standard: 'New users who chose Standard',
   start_advanced: 'New users who chose Advanced',
   game: 'Games started (first pitch logged)',
+  game_done: 'Games ended with the End game button',
   first_game: 'Devices that logged their first game',
   game3: 'Devices that reached 3 games',
   game10: 'Devices that reached 10 games',

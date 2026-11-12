@@ -46,12 +46,17 @@ export function defaultZoneForLoc(loc) {
   if (loc === 12) return 'heart';
   return locInZone(loc) ? 'edge' : 'chase';
 }
-export function locName(loc) {
+/** Catcher's view. With the batter's side known, left/right become inside/away
+ *  (a right-handed batter stands on the catcher's left). */
+export function locName(loc, bats) {
   if (loc == null) return '';
   const [r, c] = locRC(loc);
   const v = ['Way up', 'Up', 'Middle', 'Down', 'Way down'][r];
-  const h = ['way left', 'left', 'center', 'right', 'way right'][c];
-  return `${v} · ${h}`;
+  const sides = {
+    R: ['way inside', 'inside', 'middle', 'away', 'way away'],
+    L: ['way away', 'away', 'middle', 'inside', 'way inside'],
+  }[bats] || ['way left', 'left', 'center', 'right', 'way right'];
+  return `${v} · ${sides[c]}`;
 }
 
 export function countState(balls, strikes) {
@@ -83,13 +88,14 @@ export function replayGame(game) {
     pas.push(cur);
     cur = newPA(cur.num + 1, game.id);
   };
-  for (const ev of game.events || []) {
+  (game.events || []).forEach((ev, idx) => {
     if (ev.type === 'end') {
+      cur.endIdx = idx;
       close(ev.reason || 'OTHER', cur.balls, cur.strikes);
-      continue;
+      return;
     }
     const p = {
-      ...ev, gameId: game.id, paNum: cur.num, pitchNum: cur.pitches.length + 1,
+      ...ev, idx, gameId: game.id, paNum: cur.num, pitchNum: cur.pitches.length + 1,
       balls: cur.balls, strikes: cur.strikes, paResult: null,
     };
     cur.pitches.push(p);
@@ -115,7 +121,7 @@ export function replayGame(game) {
         close(ev.outcome || 'OUT', b, s);
         break;
     }
-  }
+  });
   return { pas, current: cur, pitches };
 }
 

@@ -138,3 +138,14 @@ test('pitch types: split, filtered heat map and CSV column', async () => {
   assert.match(toCSV([g]).split('\r\n')[1], /,Fastball,heart,/);
   assert.equal(buildReport([game([P('B', 'chase')])]).typed, false);
 });
+
+test('replay carries event indexes for editing; locName knows inside/away', async () => {
+  const { locName } = await import('../public/js/stats.js');
+  const g = game([P('B'), { type: 'end', reason: 'IBB' }, P('CS'), P('SS')]);
+  const r = replayGame(g);
+  assert.equal(r.pas[0].endIdx, 1);
+  assert.deepEqual(r.pitches.map((p) => p.idx), [0, 2, 3]);
+  assert.equal(locName(10, 'R'), 'Middle · way inside');
+  assert.equal(locName(10, 'L'), 'Middle · way away');
+  assert.equal(locName(13, null), 'Middle · right');
+});
