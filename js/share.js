@@ -71,7 +71,7 @@ export function renderSummary(data) {
 
   let y = P + 28;
   ctx.fillStyle = C.accent; ctx.font = `700 26px ${FONT}`;
-  ctx.fillText('AT-BAT LOG', P, y);
+  ctx.fillText('BLEACHER STATS', P, y);
   y += 84;
   ctx.fillStyle = C.text; fitText(ctx, data.title, W - P * 2, 700, 68);
   ctx.fillText(data.title, P, y);

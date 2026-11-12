@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>Bleacher Stats has moved</title>
+  <meta name="theme-color" content="#fafaf8">
+  <style>
+    :root { color-scheme: light dark; --bg: #fafaf8; --text: #111110; --muted: #6f6e68; --fill: #f0efeb; --accent: #1c5cab; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #121211; --text: #f0efec; --muted: #9a998f; --fill: #242422; --accent: #3987e5; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 480px; margin: 0 auto; padding: max(32px, env(safe-area-inset-top)) 20px 40px; }
+    h1 { font-size: 1.6rem; letter-spacing: -.02em; margin: 8px 0 8px; }
+    p { color: var(--muted); margin: 0 0 12px; }
+    .btn { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 56px; border: 0; border-radius: 14px; font: inherit; font-weight: 700; font-size: 1.05rem; cursor: pointer; text-decoration: none; margin: 10px 0; }
+    .primary { background: var(--accent); color: #fff; }
+    .secondary { background: var(--fill); color: var(--text); }
+    .box { background: var(--fill); border-radius: 14px; padding: 14px 16px; margin-top: 20px; }
+    .box p { margin: 0; color: var(--text); font-size: .95rem; }
+    .new { font-weight: 700; color: var(--accent); word-break: break-all; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>We have a new name: Bleacher Stats</h1>
+    <p>The app moved to <span class="new">bleacherstats.netlify.app</span>. Same app, new address.</p>
+    <div id="actions"></div>
+    <div class="box"><p><b>On your home screen?</b> After moving, add the new address to your home screen and delete the old icon.</p></div>
+  </main>
+  <script>
+    const NEW = 'https://bleacherstats.netlify.app/';
+    // Stop the old offline copy from loading the old app instead of this page.
+    if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
+    if (window.caches) caches.keys().then((ks) => ks.forEach((k) => caches.delete(k))).catch(() => {});
+
+    const actions = document.getElementById('actions');
+    let raw = null, games = 0;
+    try {
+      raw = localStorage.getItem('atbatlog.v1');
+      games = raw ? (JSON.parse(raw).games || []).filter((g) => (g.events || []).length).length : 0;
+    } catch (e) { raw = null; }
+
+    function b64url(bytes) {
+      let s = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    async function move() {
+      const bytes = new TextEncoder().encode(raw);
+      let tag = 'r', out = bytes;
+      if ('CompressionStream' in window) {
+        const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
+        out = new Uint8Array(await new Response(stream).arrayBuffer());
+        tag = 'g';
+      }
+      const enc = b64url(out);
+      if (enc.length > 1500000) { alert('You have a lot of games! Please save a backup file and restore it at the new address (Settings → Restore from backup).'); return; }
+      location.href = `${NEW}#import=${tag}${enc}`;
+    }
+    function backup() {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([raw], { type: 'application/json' }));
+      a.download = `bleacher-stats-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a); a.click();
+    }
+    if (games) {
+      actions.innerHTML = `<p>You have <b>${games} game${games === 1 ? '' : 's'}</b> saved at the old address. One tap brings them along.</p>
+        <button class="btn primary" id="move">Move my games</button>
+        <button class="btn secondary" id="backup">Save a backup file instead</button>`;
+      document.getElementById('move').onclick = () => move().catch(() => alert('That didn\'t work. Please save a backup file and restore it at the new address.'));
+      document.getElementById('backup').onclick = backup;
+    } else {
+      actions.innerHTML = `<a class="btn primary" href="${NEW}">Open Bleacher Stats</a>`;
+    }
+  </script>
+</body>
+</html>

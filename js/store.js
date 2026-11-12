@@ -32,7 +32,7 @@ export function save(db) {
 /** Validate a backup file before replacing local data. */
 export function parseBackup(text) {
   const data = JSON.parse(text);
-  if (!data || !Array.isArray(data.games)) throw new Error('Not an At-Bat Log backup file');
+  if (!data || !Array.isArray(data.games)) throw new Error('Not a Bleacher Stats backup file');
   for (const g of data.games) {
     if (!g.id || !Array.isArray(g.events)) throw new Error('Backup file has a malformed game');
   }

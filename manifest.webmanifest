@@ -1,6 +1,6 @@
 {
-  "name": "At-Bat Log",
-  "short_name": "At-Bat Log",
+  "name": "Bleacher Stats",
+  "short_name": "Bleacher Stats",
   "description": "Pitch-by-pitch at-bat logging for youth baseball parents.",
   "start_url": "./",
   "scope": "./",

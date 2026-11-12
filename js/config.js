@@ -1,6 +1,6 @@
 // App settings. Edit this file to turn on payments; see README "Getting paid".
 export const CONFIG = {
-  appName: 'At-Bat Log',
+  appName: 'Bleacher Stats',
   version: '1.0.0',
   supportEmail: '', // shown on the Settings and Privacy pages when set
 

@@ -74,7 +74,7 @@ function backupDue() {
   return since >= BACKUP_EVERY && n > (db.prefs.backupSnoozeAt || 0);
 }
 async function doBackup() {
-  const ok = await saveFile(`at-bat-log-backup-${today()}.json`, JSON.stringify(db, null, 1), 'application/json');
+  const ok = await saveFile(`bleacher-stats-backup-${today()}.json`, JSON.stringify(db, null, 1), 'application/json');
   if (!ok) return;
   usage.track('backup');
   db.prefs.backupGames = loggedGames();
@@ -740,7 +740,7 @@ async function shareReport() {
   const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
   if (!blob) { showToast('Could not create the image'); return; }
   const slug = (single ? `${single.player}-vs-${single.opponent}-${single.date}` : `${who}-season`).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const sent = await shareOrDownload(blob, `at-bat-log-${slug || 'report'}.png`, CONFIG.appName);
+  const sent = await shareOrDownload(blob, `bleacher-stats-${slug || 'report'}.png`, CONFIG.appName);
   if (sent) usage.track('share');
 }
 
@@ -1018,7 +1018,7 @@ document.addEventListener('click', (e) => {
     case 'spray-pick': { const i = Number(el.dataset.i); ui.sprayPick = ui.sprayPick === i ? null : i; render(); break; }
     case 'csv': {
       if (!db.games.length) { showToast('No games to export yet'); break; }
-      saveFile(`at-bat-log-pitches-${today()}.csv`, toCSV(db.games), 'text/csv');
+      saveFile(`bleacher-stats-pitches-${today()}.csv`, toCSV(db.games), 'text/csv');
       break;
     }
     case 'backup': doBackup(); break;
@@ -1134,7 +1134,34 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); inst
 window.addEventListener('appinstalled', () => { installPrompt = null; ui.installSheet = false; showToast('Installed. Open it from your home screen.', 3500); render(); });
 
 // ---------- boot ----------
+// Games carried over from the old web address (see moved/index.html).
+async function importFromHash() {
+  const m = location.hash.match(/^#import=([gr])([A-Za-z0-9_-]+)$/);
+  if (!m) return;
+  history.replaceState(null, '', `${location.pathname}#/`);
+  try {
+    const b64 = m[2].replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    let text;
+    if (m[1] === 'g') {
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+      text = await new Response(stream).text();
+    } else text = new TextDecoder().decode(bytes);
+    const incoming = store.parseBackup(text);
+    const have = new Set(db.games.map((g) => g.id));
+    const added = incoming.games.filter((g) => !have.has(g.id));
+    db.games.push(...added);
+    db.prefs = { ...incoming.prefs, ...db.prefs, mode: db.prefs.mode || incoming.prefs.mode };
+    persist();
+    showToast(added.length ? `Moved ${added.length} game${added.length === 1 ? '' : 's'} to the new address` : 'Your games are already here', 4000);
+  } catch (e) {
+    console.error(e);
+    showToast('Could not move your games. Use a backup file instead.', 5000);
+  }
+}
+
 async function boot() {
+  await importFromHash();
   // Returning from checkout: ?session_id=cs_... (set as the Payment Link's success URL)
   const sessionId = new URLSearchParams(location.search).get('session_id');
   if (sessionId && pro.proEnabled()) {

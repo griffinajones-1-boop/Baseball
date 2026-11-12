@@ -1,4 +1,4 @@
-# At-Bat Log
+# Bleacher Stats
 
 A mobile-first, offline-capable web app for parents to log their kid's at-bats pitch by pitch.
 No login, no server, no build step. Everything is stored on the phone (localStorage).
