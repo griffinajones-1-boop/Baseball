@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { verifyPurchase } from '../server/verify-core.js';
-import { buildReport, buildInsights, buildTrends, gameLine, replayGame } from '../js/stats.js';
+import { buildReport, buildInsights, buildTrends, gameLine, replayGame } from '../public/js/stats.js';
 
 const fake = (routes) => async (url) => {
   const path = url.replace('https://api.stripe.com/v1', '');

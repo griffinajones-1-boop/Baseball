@@ -9,7 +9,7 @@ import {
 import { fieldSVG, pointToField } from './field.js';
 import { renderSummary, shareOrDownload } from './share.js';
 import * as usage from './usage.js';
-import { sendFeedback, flushFeedback, pendingFeedback } from './feedback.js';
+import { sendFeedback, flushFeedback } from './feedback.js';
 
 let db = store.load();
 let installPrompt = null; // Android/desktop "install app" event

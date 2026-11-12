@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { replayGame, buildReport, toCSV, defaultZoneForLoc, countState, scaleScore, metric } from '../js/stats.js';
+import { replayGame, buildReport, toCSV, defaultZoneForLoc, countState, scaleScore, metric } from '../public/js/stats.js';
 
 const P = (result, zone = 'heart', extra = {}) => ({ type: 'pitch', zone, loc: null, result, t: 0, ...extra });
 const game = (events, id = 'g1') => ({ id, date: '2026-05-01', opponent: 'Tigers', player: 'Sam', createdAt: 1, events });
@@ -123,7 +123,7 @@ test('heat map: batting average and hard contact by location', () => {
 });
 
 test('pitch types: split, filtered heat map and CSV column', async () => {
-  const { buildHeat } = await import('../js/stats.js');
+  const { buildHeat } = await import('../public/js/stats.js');
   const g = game([
     P('IP', 'heart', { loc: 12, pitch: 'FB', outcome: '1B', contact: 'hard' }),
     P('SS', 'chase', { loc: 20, pitch: 'BR' }), P('SS', 'chase', { loc: 20, pitch: 'BR' }), P('B', 'chase', { loc: 0 }), P('SS', 'chase', { loc: 24, pitch: 'BR' }),

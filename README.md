@@ -1,94 +1,84 @@
 # Bleacher Stats
 
-A mobile-first, offline-capable web app for parents to log their kid's at-bats pitch by pitch.
-No login, no server, no build step. Everything is stored on the phone (localStorage).
+Log your kid's at-bats pitch by pitch from the stands, and see what they swing at, what they miss,
+and how it changes over the season.
 
-## Logging a pitch (2 taps for most pitches)
+Live: https://bleacherstats.netlify.app (free Netlify hosting, deployed automatically from `main`).
 
-1. **Where it was**: tap a spot on the 5×5 grid (catcher's view; the outlined 3×3 is the strike zone).
-   This picks a suggested zone (center = Heart, rest of the zone = Edge, outside = Chase). Or tap
-   **Heart / Edge / Chase / Waste** directly; tap a zone button to override the suggestion.
-2. **What happened**: Ball, Called strike, Swinging strike, Foul, In play, HBP.
-   - **In play** opens a sheet: contact (weak/medium/hard), trajectory, tap the field where the ball
-     went, then the outcome (Out/1B/2B/3B/HR/Error), which saves the pitch.
-   - HBP needs no zone (it's logged as Waste).
+- Mobile-first web app that installs to the home screen and works with no signal.
+- No accounts. Games live on the phone (localStorage); backups and CSV export are in Settings.
+- Plain HTML, CSS and JavaScript. No build step.
 
-The count is tracked automatically. Walks, strikeouts (fouls with 2 strikes don't count), HBP and balls
-in play end the PA on their own. **Undo** removes the last pitch and reopens the PA if that pitch ended it.
-The **⋯** menu ends a PA without a pitch result (intentional walk, runner caught stealing, game over).
+![Logging screen](docs/02-logging-standard.png)
 
-## Reports
+## Modes
 
-Per game or season, filterable by player: chase rate, zone swing rate, heart take rate, first-pitch
-swing rate, whiff rate, zone contact rate, swinging-strike rate, 2-strike chase rate, K rate,
-pitches/PA, hard-hit rate, AVG/OBP/SLG, ahead/even/behind count splits, zone heat map
-(pitches / swing % / whiff %), spray chart colored by contact quality, and a PA-by-PA log for a game.
+New users pick one on the welcome screen; it can be changed on the New game form or in Settings.
+Switching never deletes data, only what's logged and shown.
 
-Definitions: in-zone = Heart + Edge, out-of-zone = Chase + Waste. Ahead = more balls than strikes,
-behind = more strikes than balls, even = equal counts plus 3-2. A stat shows **Small sample**
-when the pitches (or PAs) behind it are below the thresholds in `MIN_N` in `js/stats.js`.
+| | Basic | Standard | Advanced |
+|---|---|---|---|
+| Per pitch | What happened (1 tap) | Where it was + what happened | Same, plus optional pitch type |
+| Ball in play | Result | Contact, field location, result | Also ground ball / liner / fly / popup |
+| Reports | Swing and miss, strikeout rate, pitches per PA | Swing decisions, hot/cold heat map, spray chart | Every stat, count and pitch-type splits |
 
-## Launch plan: free first
+The count, walks, strikeouts and the end of each plate appearance are automatic. **Undo** removes the
+last pitch. The **⋯** menu ends a PA without a pitch (intentional walk, runner out, game over).
 
-The app ships fully free. In `js/config.js`:
+## Screens
 
-- `pro.enabled: false`: no upgrade UI anywhere. Game and season reports are complete.
-- `features.insights` and `features.trends` are built but switched off. Set one to `true` to roll it out.
-- When you're ready to charge, set `pro.enabled: true`. The season heat map, spray chart, count
-  splits and any switched-on extras then need Pro; logging, game reports, the season stat list,
-  CSV export and backups always stay free.
+- **Games**: game list, season card, backup and install reminders.
+- **Player**: a scouting-style page with slash line, blue-to-red rating sliders, heat map, spray chart.
+- **Reports**: per game or season, with a **Share** button that makes an image for texting.
+- **Settings**: mode, feedback, export, backup/restore, usage-count opt-out.
 
-## Getting paid (Stripe)
+Rating sliders use fixed cutoffs in `SCALE` in `public/js/stats.js`. They are a general guide set by
+judgment, not percentiles; have a hitting coach review them. "Early read" marks stats with few pitches
+(`MIN_N` in the same file).
 
-1. In Stripe, create a product with a yearly and a monthly price, and a **Payment Link** for each.
-2. In each Payment Link, set "After payment" to redirect to
-   `https://YOUR-DOMAIN/?session_id={CHECKOUT_SESSION_ID}`.
-3. Paste the two links into `plans[].url` in `js/config.js` and set the prices you chose.
-4. Recommended: turn on purchase checking. Add the environment variable `STRIPE_SECRET_KEY` in
-   Vercel or Netlify, then set `verifyUrl: '/api/verify'` in `js/config.js`. This also enables
-   "Restore purchase" by email on a new phone and re-checks subscriptions when they renew.
-   Without it the app trusts the redirect, so anyone who learns the URL pattern can unlock Pro.
-5. Optional: put your Stripe customer-portal link in `manageUrl` so subscribers can cancel themselves.
+## Feedback and usage counts (Netlify)
 
-The check lives in `server/verify-core.js` (unit-tested with a mocked Stripe), with thin wrappers in
-`api/verify.js` (Vercel) and `netlify/functions/verify.js` (Netlify). Run through one real test-mode
-purchase before launch. On localhost the Pro page has a "Preview Pro" link for trying the paid view.
+- **Feedback** (Settings → Send feedback) submits to Netlify Forms, form `feedback`. See messages in
+  Netlify → site → Forms; add an email notification there to get each one by email.
+- **Usage counts**: the app sends event names only (opened today, game started, 3rd game, share…)
+  to `/api/track`, which keeps daily totals in Netlify Blobs. No IDs, cookies or game data.
+  View them at `/stats.html#key=<STATS_KEY>`; `STATS_KEY` is a Netlify environment variable.
+  People can turn this off in Settings.
 
-Before launch also set `supportEmail` in `js/config.js` and read `privacy.html`.
+## Paid tier (built, switched off)
 
-## Data
+`public/js/config.js` has `pro.enabled: false` and `features.insights` / `features.trends` set to
+false. Turning Pro on as built moves the season heat map, spray chart and count splits behind it,
+which would take them away from existing users: charge only for new features instead.
+Stripe checkout and a purchase check (`server/verify-core.js`, `netlify/functions/verify.js`,
+`api/verify.js`) are ready; set `STRIPE_SECRET_KEY` and the plan links in the config to use them.
 
-**Settings** has: CSV export (one row per pitch, with count, zone, location, result, contact,
-trajectory, spray x/y, outcome and PA result), JSON backup/restore, and erase. Data lives only in that
-browser on that device, so download a backup now and then.
-
-## Run locally
+## Run and test
 
 ```bash
-python3 -m http.server 8080
+npm install
 ```
 
-Open http://localhost:8080. Run the logic tests with `npm test` (Node 18+).
+```bash
+npm test
+```
 
-## Deploy (free)
+```bash
+npm start
+```
 
-It's a static site; publish the folder as-is.
+Then open http://localhost:8080. Usage counts are not sent from localhost.
 
-- **Netlify**: drag the folder onto app.netlify.com/drop, or connect the repo (`netlify.toml` is included).
-- **Vercel**: `npx vercel` in this folder, or import the repo with framework preset "Other" and no build command.
-- **GitHub Pages** also works (all paths are relative).
+When you change files in `public/`, bump `VERSION` in `public/sw.js` so installed phones update.
 
-HTTPS is required for offline/install support (all three provide it). When you ship changes, bump
-`VERSION` in `sw.js` so installed phones pick up the new files.
+## Layout
 
-## Files
-
-- `index.html`, `css/app.css`: shell and styles (light/dark follow the phone setting)
-- `js/app.js`: screens and tap handling
-- `js/stats.js`: count replay, PA building, all stat formulas, CSV (pure, unit-tested)
-- `js/store.js`: local storage, backup parsing
-- `js/field.js`: field diagram SVG
-- `js/config.js`, `js/pro.js`: prices, payment links and the Pro unlock
-- `server/`, `api/`, `netlify/functions/`: optional purchase check
-- `privacy.html`: privacy policy
-- `sw.js`, `manifest.webmanifest`, `icons/`: PWA offline + install
+- `public/`: the app (published folder)
+  - `index.html`, `css/app.css`, `js/app.js` (screens), `js/stats.js` (all stat math, unit-tested),
+    `js/store.js`, `js/field.js`, `js/share.js`, `js/usage.js`, `js/feedback.js`, `js/pro.js`, `js/config.js`
+  - `sw.js`, `manifest.webmanifest`, `icons/`: offline and install
+  - `privacy.html`, `stats.html`
+- `netlify/functions/`, `server/`: usage counts and the optional purchase check
+- `moved/`: the page at the old address (atbat-log.netlify.app), a separate Netlify site, that moves
+  games saved there to the new address
+- `tests/`: `npm test`
