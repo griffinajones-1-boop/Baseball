@@ -85,6 +85,43 @@ function describePA(pa) {
 }
 const backHeader = (title, href = '#/', right = '<span class="spacer"></span>') => `<header class="top"><a class="icon-btn" href="${href}" data-act="back" aria-label="Back">‹</a><h1>${title}</h1>${right}</header>`;
 
+// ---------- modes ----------
+// What each mode logs and shows. Data is never deleted when switching; only the screens change.
+const MODES = {
+  basic: {
+    label: 'Basic', taps: 'One tap a pitch', level: 1,
+    blurb: 'Just what happened: ball, strike, foul or in play. Box score, strikeouts, walks and swing-and-miss.',
+    good: 'Great for younger kids or a first season.',
+    zone: false, contact: false, traj: false, field: false, pitchType: false,
+  },
+  standard: {
+    label: 'Standard', taps: 'Two taps a pitch', level: 2,
+    blurb: 'Where the pitch was and what happened. Adds chase rate, hot and cold zones and a spray chart.',
+    good: 'Recommended for most parents.',
+    zone: true, contact: true, traj: false, field: true, pitchType: false,
+  },
+  advanced: {
+    label: 'Advanced', taps: 'Two taps, plus optional extras', level: 3,
+    blurb: 'Everything: pitch type and ball flight, count splits, pitch-type splits and every stat.',
+    good: 'For stat lovers and hitting coaches.',
+    zone: true, contact: true, traj: true, field: true, pitchType: true,
+  },
+};
+// People who logged games before modes existed keep everything they had (Advanced).
+const modeId = () => (MODES[db.prefs.mode] ? db.prefs.mode : db.games.length ? 'advanced' : 'standard');
+const M = () => MODES[modeId()];
+const lvl = () => M().level;
+function setMode(id) {
+  if (!MODES[id]) return;
+  db.prefs.mode = id; persist();
+}
+function modeSeg(note = true) {
+  const cur = modeId();
+  return `<div class="segs modeseg" role="radiogroup" aria-label="Mode">${Object.entries(MODES).map(([id, m]) =>
+    `<button type="button" class="seg ${id === cur ? 'sel' : ''}" role="radio" aria-checked="${id === cur}" data-act="set-mode" data-v="${id}">${m.label}</button>`).join('')}</div>
+    ${note ? `<p class="hint mode-note"><b>${M().taps}.</b> ${M().blurb}</p>` : ''}`;
+}
+
 // ---------- add to home screen ----------
 const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 function platform() {
@@ -203,10 +240,12 @@ function tabBar(active) {
 }
 
 // ---------- player page ----------
-const PROFILE_STATS = [
-  ['chase', 'Chase rate'], ['zoneSwing', 'Zone swing'], ['heartTake', 'Heart take'], ['twoStrikeChase', 'Two-strike chase'],
-  ['whiff', 'Whiff rate'], ['zoneContact', 'Zone contact'], ['swStr', 'Swinging strikes'], ['hardHit', 'Hard-hit rate'], ['kRate', 'K rate'],
-];
+const PROFILE_STATS = {
+  1: [['whiff', 'Swing and miss'], ['swStr', 'Misses per pitch'], ['kRate', 'Strikeout rate']],
+  2: [['chase', 'Chase rate'], ['zoneSwing', 'Zone swing'], ['heartTake', 'Heart take'], ['whiff', 'Whiff rate'], ['hardHit', 'Hard-hit rate'], ['kRate', 'K rate']],
+  3: [['chase', 'Chase rate'], ['zoneSwing', 'Zone swing'], ['heartTake', 'Heart take'], ['twoStrikeChase', 'Two-strike chase'],
+    ['whiff', 'Whiff rate'], ['zoneContact', 'Zone contact'], ['swStr', 'Swinging strikes'], ['hardHit', 'Hard-hit rate'], ['kRate', 'K rate']],
+};
 function profileRow(key, label, m) {
   const t = scaleScore(key, m);
   const tiny = m.den < 5, small = m.small;
@@ -253,19 +292,19 @@ function viewPlayer() {
     <div class="tiles">${tile(sl.h, 'Hits')}${tile(count('HR'), 'HR')}${tile(sl.bb, 'BB')}${tile(count('K'), 'K')}</div>
     ${sl.small && sl.pa ? `<p class="hint center">Early in the season: only ${sl.pa} PA so far.</p>` : ''}
 
-    ${deep && CONFIG.features.insights ? viewInsights(rep) : ''}
+    ${deep && lvl() >= 2 && CONFIG.features.insights ? viewInsights(rep) : ''}
 
     <h2 class="section">How they rate</h2>
     <div class="card">
       <div class="scale-key in-card" aria-hidden="true"><span>Needs work</span><i></i><span>Great</span></div>
-      ${PROFILE_STATS.map(([k, l]) => profileRow(k, l, S[k])).join('')}
+      ${PROFILE_STATS[lvl()].map(([k, l]) => profileRow(k, l, S[k])).join('')}
     </div>
     <p class="hint">A general guide for youth hitters, not a ranking against other players. Hollow markers are early reads.</p>
 
-    ${deep ? `
+    ${lvl() < 2 ? '' : deep ? `
     <h2 class="section">Hot and cold zones</h2>
     ${viewHeat(rep)}
-    ${viewByType(rep)}
+    ${lvl() >= 3 ? viewByType(rep) : ''}
     <h2 class="section">Where the ball goes</h2>
     ${viewSpray(rep, games)}` : viewUpsell()}
 
@@ -289,7 +328,7 @@ function seasonCard() {
     <span class="sc-stats">
       <span><b>${rate3(sl.avg)}</b>AVG</span>
       <span><b>${rate3(sl.obp)}</b>OBP</span>
-      <span><b>${pct(rep.stats.chase.value)}</b>Chase</span>
+      ${lvl() >= 2 ? `<span><b>${pct(rep.stats.chase.value)}</b>Chase</span>` : `<span><b>${pct(rep.stats.kRate.value)}</b>K rate</span>`}
       <span><b>${rep.paCount}</b>PA</span>
     </span>
   </a>`;
@@ -301,18 +340,16 @@ function viewHome() {
   if (!games.length) {
     return `<main class="page">
       <header class="top"><h1>${esc(CONFIG.appName)}</h1></header>
-      <section class="welcome">
-        <img src="icons/icon.svg" alt="" width="72" height="72">
+      <section class="welcome compact">
+        <img src="icons/icon.svg" alt="" width="56" height="56">
         <h2>Every pitch tells you something</h2>
-        <p>Log your kid's at-bats in two taps a pitch. See what they swing at, what they miss, and how it changes over the season.</p>
-        <ol class="steps">
-          <li><b>Tap where the pitch was</b></li>
-          <li><b>Tap what happened</b></li>
-          <li><b>Read the report after the game</b></li>
-        </ol>
+        <p>Log your kid's at-bats pitch by pitch. See what they swing at, what they miss, and how it changes over the season.</p>
       </section>
-      <a class="btn primary huge" href="#/new">Start your first game</a>
-      <p class="hint center">Free. No account. Works without signal.</p>
+      <p class="label">How much do you want to track?</p>
+      <div class="modes">${Object.entries(MODES).map(([id, m]) => `<button class="modecard ${id === 'standard' ? 'rec' : ''}" data-act="choose-mode" data-v="${id}">
+        <span class="mc-top"><b>${m.label}</b>${id === 'standard' ? '<span class="mc-tag">Recommended</span>' : ''}<span class="mc-taps">${m.taps}</span></span>
+        <span class="mc-blurb">${m.blurb}</span></button>`).join('')}</div>
+      <p class="hint center">You can switch anytime in Settings. Free. No account. Works without signal.</p>
     </main>`;
   }
   const list = games.map((g) => {
@@ -350,6 +387,7 @@ function viewGameForm(g) {
       <datalist id="players">${opts}</datalist>
       <label>Opponent<input name="opponent" maxlength="40" autocomplete="off" value="${esc(g ? g.opponent : '')}" placeholder="Tigers"></label>
       <label>Date<input name="date" type="date" required value="${esc(g ? g.date : today())}"></label>
+      ${g ? '' : `<div class="form-field"><span class="form-label">Mode</span>${modeSeg()}</div>`}
       <button class="btn primary huge" type="submit">${g ? 'Save' : 'Start logging'}</button>
       ${g ? `<button class="btn danger-link block" type="button" data-act="delete-game" data-id="${g.id}">Delete this game</button>` : ''}
     </form>
@@ -362,11 +400,12 @@ function viewLive(g) {
   const b = current.balls, s = current.strikes;
   const dots = (n, max) => Array.from({ length: max }, (_, i) => `<i class="dot ${i < n ? 'on' : ''}"></i>`).join('');
   const last = g.events[g.events.length - 1];
-  let lastText = 'Tap where the pitch was, then what happened';
+  const m = M();
+  let lastText = m.zone ? 'Tap where the pitch was, then what happened' : 'Tap what happened on each pitch';
   if (last && last.type === 'end') lastText = `PA ended · ${PA_RESULTS[last.reason]}`;
   else if (last) {
     const lp = pitches[pitches.length - 1];
-    lastText = `${lp.balls}-${lp.strikes} ${RESULTS[lp.result]}${lp.result === 'IP' && lp.outcome ? ` · ${OUTCOMES[lp.outcome]}` : ''} · ${ZONE_LABELS[lp.zone]}${lp.pitch ? ` · ${PITCH_TYPES[lp.pitch]}` : ''}`;
+    lastText = `${lp.balls}-${lp.strikes} ${RESULTS[lp.result]}${lp.result === 'IP' && lp.outcome ? ` · ${OUTCOMES[lp.outcome]}` : ''} ${lp.zone ? ` · ${ZONE_LABELS[lp.zone]}` : ''}${lp.pitch ? ` · ${PITCH_TYPES[lp.pitch]}` : ''}`;
   }
   const countKey = `${current.num}:${b}-${s}`;
   const pop = ui.countKey && ui.countKey !== countKey ? 'pop' : '';
@@ -382,7 +421,7 @@ function viewLive(g) {
     ['F', 'Foul'], ['IP', 'In play'], ['HBP', 'HBP'],
   ].map(([k, label]) => `<button class="rbtn r-${k}" data-act="result" data-r="${k}">${label}</button>`).join('');
 
-  return `<main class="live">
+  return `<main class="live ${m.zone ? '' : 'basic'}">
     <header class="live-top">
       <a class="icon-btn" href="#/" aria-label="Back to games">‹</a>
       <div class="live-title">${esc(g.player || 'Batter')} <span class="muted">vs ${esc(g.opponent || 'Opp')}</span></div>
@@ -393,11 +432,11 @@ function viewLive(g) {
       <div class="count-dots"><div>${dots(b, 3)}</div><div>${dots(s, 2)}</div></div>
       <div class="count-pa">PA ${current.num}<span>Pitch ${current.pitches.length + 1}</span></div>
     </section>
-    <section class="zone-wrap">
+    ${m.zone ? `<section class="zone-wrap">
       <div class="locgrid" aria-label="Pitch location, catcher's view">${cells}<div class="sz-outline" aria-hidden="true"></div></div>
       <div class="zbtns" id="zbtns">${zoneBtns}</div>
-    </section>
-    ${db.prefs.pitchTypes === false ? '' : `<section class="ptypes" aria-label="Pitch type, optional">${Object.entries(PITCH_TYPES).map(([k, v]) => `<button class="ptype ${ui.pitchType === k ? 'sel' : ''}" data-act="ptype" data-v="${k}">${v}</button>`).join('')}</section>`}
+    </section>` : ''}
+    ${!m.pitchType || db.prefs.pitchTypes === false ? '' : `<section class="ptypes" aria-label="Pitch type, optional">${Object.entries(PITCH_TYPES).map(([k, v]) => `<button class="ptype ${ui.pitchType === k ? 'sel' : ''}" data-act="ptype" data-v="${k}">${v}</button>`).join('')}</section>`}
     <section class="laststrip">
       <span class="last-text">${esc(lastText)}</span>
       <button class="undo" data-act="undo" ${g.events.length ? '' : 'disabled'}>↶ Undo</button>
@@ -428,14 +467,15 @@ function viewMenu(g, current) {
 
 function viewInPlay() {
   const ip = ui.ip;
+  const m = M();
   const opt = (group, key, label) => `<button class="opt ${ip[group] === key ? 'sel' : ''}" data-act="ip-${group}" data-v="${key}">${label}</button>`;
   const dot = ip.spray ? `<circle class="spray-pick" cx="${ip.spray.x * 200}" cy="${ip.spray.y * 200}" r="6"/>` : '';
   return `<div class="sheet-bg"></div>
   <div class="sheet" role="dialog" aria-label="Ball in play">
     <div class="sheet-head"><h2>Ball in play</h2><button class="link" data-act="ip-cancel">Cancel</button></div>
-    <div class="optrow three">${CONTACT.map((c) => opt('contact', c, c[0].toUpperCase() + c.slice(1))).join('')}</div>
-    <div class="optrow four">${Object.entries(TRAJ).map(([k, v]) => opt('traj', k, v.replace(' ball', '').replace('Line drive', 'Liner'))).join('')}</div>
-    <div class="field-input" data-act="ip-field">${fieldSVG(dot)}${ip.spray ? '' : '<span class="field-hint">Tap where it went</span>'}</div>
+    ${m.contact ? `<div class="optrow three">${CONTACT.map((c) => opt('contact', c, c[0].toUpperCase() + c.slice(1))).join('')}</div>` : ''}
+    ${m.traj ? `<div class="optrow four">${Object.entries(TRAJ).map(([k, v]) => opt('traj', k, v.replace(' ball', '').replace('Line drive', 'Liner'))).join('')}</div>` : ''}
+    ${m.field ? `<div class="field-input" data-act="ip-field">${fieldSVG(dot)}${ip.spray ? '' : '<span class="field-hint">Tap where it went</span>'}</div>` : ''}
     <p class="label">Result</p>
     <div class="optrow outcomes">${Object.keys(OUTCOMES).map((k) => `<button class="opt" data-act="ip-outcome" data-v="${k}">${k === 'OUT' ? 'Out' : k === 'E' ? 'Error' : k}</button>`).join('')}</div>
   </div>`;
@@ -444,9 +484,10 @@ function viewInPlay() {
 function logPitch(result, extra = {}) {
   const g = getGame(route().id);
   if (!g) return false;
-  let zone = ui.sel.zone;
-  if (!zone && result === 'HBP') zone = 'waste';
-  if (!zone) {
+  const m = M();
+  let zone = m.zone ? ui.sel.zone : null;
+  if (m.zone && !zone && result === 'HBP') zone = 'waste';
+  if (m.zone && !zone) {
     const zb = document.getElementById('zbtns');
     zb?.classList.remove('need'); void zb?.offsetWidth; zb?.classList.add('need');
     showToast('Pick a zone first', 1600);
@@ -454,7 +495,7 @@ function logPitch(result, extra = {}) {
     return false;
   }
   const before = replayGame(g).current.num;
-  g.events.push({ type: 'pitch', t: Date.now(), zone, loc: ui.sel.loc, result, ...(ui.pitchType ? { pitch: ui.pitchType } : {}), ...extra });
+  g.events.push({ type: 'pitch', t: Date.now(), zone, loc: m.zone ? ui.sel.loc : null, result, ...(m.pitchType && ui.pitchType ? { pitch: ui.pitchType } : {}), ...extra });
   persist();
   ui.sel = { zone: null, loc: null };
   ui.pitchType = null;
@@ -507,6 +548,33 @@ function statRow(key, label, m, def, fmt = pct) {
     <p class="stat-def">${def}</p></details>`;
 }
 
+const STAT_DEFS = {
+  chase: ['Chase rate', 'Swings at Chase + Waste pitches ÷ Chase + Waste pitches.'],
+  zoneSwing: ['Zone swing rate', 'Swings at Heart + Edge pitches ÷ Heart + Edge pitches.'],
+  heartTake: ['Heart take rate', 'Heart pitches taken ÷ Heart pitches. Lower is better.'],
+  firstPitchSwing: ['First-pitch swing', 'Swings at the first pitch of a PA ÷ first pitches.'],
+  twoStrikeChase: ['Two-strike chase', 'Chase rate with two strikes.'],
+  whiff: ['Whiff rate', 'Swinging strikes ÷ swings.'],
+  zoneContact: ['Zone contact', 'Fouls + balls in play ÷ swings at Heart + Edge pitches.'],
+  swStr: ['Swinging-strike rate', 'Swinging strikes ÷ all pitches.'],
+  hardHit: ['Hard-hit rate', 'Hard contact ÷ balls in play.'],
+  kRate: ['K rate', 'Strikeouts ÷ plate appearances.'],
+  pPerPA: ['Pitches per PA', 'Average pitches seen per plate appearance.'],
+};
+// Plainer names in Basic mode.
+const BASIC_NAMES = { whiff: 'Swing and miss', kRate: 'Strikeout rate', swStr: 'Misses per pitch', firstPitchSwing: 'Swings at first pitch' };
+const REPORT_GROUPS = {
+  1: [['Results', ['whiff', 'swStr', 'firstPitchSwing', 'kRate', 'pPerPA']]],
+  2: [['Swing decisions', ['chase', 'zoneSwing', 'heartTake', 'firstPitchSwing']], ['Contact', ['whiff', 'hardHit']], ['Plate appearances', ['kRate', 'pPerPA']]],
+  3: [['Swing decisions', ['chase', 'zoneSwing', 'heartTake', 'firstPitchSwing', 'twoStrikeChase']], ['Contact', ['whiff', 'zoneContact', 'swStr', 'hardHit']], ['Plate appearances', ['kRate', 'pPerPA']]],
+};
+const statName = (k) => (lvl() === 1 && BASIC_NAMES[k]) || STAT_DEFS[k][0];
+function reportStats(S) {
+  const num = (v) => (v == null ? '—' : v.toFixed(1));
+  return REPORT_GROUPS[lvl()].map(([title, keys]) => `<h2 class="section">${title}</h2>
+    <div class="stats">${keys.map((k) => statRow(k, statName(k), S[k], STAT_DEFS[k][1], k === 'pPerPA' ? num : pct)).join('')}</div>`).join('');
+}
+
 function viewReport() {
   const f = ui.report;
   const ps = players(); const ss = seasons();
@@ -546,42 +614,23 @@ function viewReport() {
       <div class="hint">${outcomeList}</div>
     </section>
 
-    ${!single && isPro && CONFIG.features.insights ? viewInsights(rep) : ''}
+    ${!single && isPro && lvl() >= 2 && CONFIG.features.insights ? viewInsights(rep) : ''}
 
     <div class="scale-key" aria-hidden="true"><span>Needs work</span><i></i><span>Great</span></div>
-    <h2 class="section">Swing decisions</h2>
-    <div class="stats">
-      ${statRow('chase', 'Chase rate', S.chase, 'Swings at Chase + Waste pitches ÷ Chase + Waste pitches.')}
-      ${statRow('zoneSwing', 'Zone swing rate', S.zoneSwing, 'Swings at Heart + Edge pitches ÷ Heart + Edge pitches.')}
-      ${statRow('heartTake', 'Heart take rate', S.heartTake, 'Heart pitches taken ÷ Heart pitches. Lower is better.')}
-      ${statRow('firstPitchSwing', 'First-pitch swing', S.firstPitchSwing, 'Swings at the first pitch of a PA ÷ first pitches.')}
-      ${statRow('twoStrikeChase', 'Two-strike chase', S.twoStrikeChase, 'Chase rate with two strikes.')}
-    </div>
-    <h2 class="section">Contact</h2>
-    <div class="stats">
-      ${statRow('whiff', 'Whiff rate', S.whiff, 'Swinging strikes ÷ swings.')}
-      ${statRow('zoneContact', 'Zone contact', S.zoneContact, 'Fouls + balls in play ÷ swings at Heart + Edge pitches.')}
-      ${statRow('swStr', 'Swinging-strike rate', S.swStr, 'Swinging strikes ÷ all pitches.')}
-      ${statRow('hardHit', 'Hard-hit rate', S.hardHit, 'Hard contact ÷ balls in play.')}
-    </div>
-    <h2 class="section">Plate appearances</h2>
-    <div class="stats">
-      ${statRow('kRate', 'K rate', S.kRate, 'Strikeouts ÷ plate appearances.')}
-      ${statRow('pPerPA', 'Pitches per PA', S.pPerPA, 'Average pitches seen per plate appearance.', (v) => (v == null ? '—' : v.toFixed(1)))}
-    </div>
+    ${reportStats(S)}
 
-    ${!single && isPro && CONFIG.features.trends ? viewTrends(games) : ''}
-    ${deep ? `
-    ${viewByType(rep)}
+    ${!single && isPro && lvl() >= 2 && CONFIG.features.trends ? viewTrends(games) : ''}
+    ${lvl() < 2 ? '' : deep ? `
+    ${lvl() >= 3 ? `${viewByType(rep)}
     <h2 class="section">By count</h2>
-    ${viewSplits(rep.splits)}
+    ${viewSplits(rep.splits)}` : ''}
     <h2 class="section">Heat map</h2>
     ${viewHeat(rep)}
     <h2 class="section">Spray chart</h2>
     ${viewSpray(rep, games)}` : viewUpsell()}
 
     ${single ? `<h2 class="section">Pitch by pitch</h2>${viewPALog(rep.allPAs)}` : ''}
-    <p class="footnote">“Early read” means there aren't many pitches behind a number yet, so it can swing a lot from game to game. The blue-to-red scale is a general guide for youth hitters, not a ranking against other players. Tap any stat for its definition. In zone = Heart + Edge.</p>
+    <p class="footnote">“Early read” means there aren't many pitches behind a number yet, so it can swing a lot from game to game. The blue-to-red scale is a general guide for youth hitters, not a ranking against other players. Tap any stat for its definition.${lvl() >= 2 ? ' In zone = Heart + Edge.' : ''}</p>
   </main>`;
 }
 
@@ -647,8 +696,11 @@ async function shareReport() {
     subtitle: single ? fmtDate(single.date) : `${games.length} game${games.length === 1 ? '' : 's'} · ${rep.paCount} PA · ${rep.pitchCount} pitches`,
     headline: single ? (gameLine(rep.allPAs) || `${rep.pitchCount} pitches`) : `${rate3(sl.avg)} / ${rate3(sl.obp)} / ${rate3(sl.slg)}`,
     headlineLabel: single ? `${rep.paCount} PA · ${rep.pitchCount} pitches seen` : 'AVG / OBP / SLG',
-    stats: [stat('Chase rate', S.chase), stat('Zone swing', S.zoneSwing), stat('Whiff rate', S.whiff), stat('Hard-hit rate', S.hardHit)],
-    spray: rep.spray,
+    stats: lvl() >= 2
+      ? [stat('Chase rate', S.chase), stat('Zone swing', S.zoneSwing), stat('Whiff rate', S.whiff), stat('Hard-hit rate', S.hardHit)]
+      : [stat('Swing and miss', S.whiff), stat('Strikeout rate', S.kRate), stat('First-pitch swing', S.firstPitchSwing),
+        { label: 'Pitches per PA', value: S.pPerPA.value == null ? '—' : S.pPerPA.value.toFixed(1), sub: `${S.pPerPA.den} PA`, small: S.pPerPA.small }],
+    spray: lvl() >= 2 ? rep.spray : [],
     footer: `Made with ${CONFIG.appName} · ${location.host}`,
   });
   const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
@@ -688,10 +740,11 @@ const HEAT_MODES = {
 };
 
 function viewHeat(rep) {
-  const mode = HEAT_MODES[ui.heat] ? ui.heat : 'avg';
+  const keys = Object.keys(HEAT_MODES).filter((k) => lvl() >= 3 || ['avg', 'hard', 'seen'].includes(k));
+  const mode = keys.includes(ui.heat) ? ui.heat : 'avg';
   const M = HEAT_MODES[mode];
   const cw = 44, ch = 50, gap = 2;
-  if (ui.heatType !== 'all' && !rep.typed) ui.heatType = 'all';
+  if (ui.heatType !== 'all' && (!rep.typed || lvl() < 3)) ui.heatType = 'all';
   const src = ui.heatType === 'all' ? rep : buildHeat(rep.pitches.filter((p) => p.pitch === ui.heatType));
   const vals = src.heat.map(M.get);
   const max = mode === 'seen' ? Math.max(1, ...vals.map((x) => x.v || 0)) : 1;
@@ -716,8 +769,8 @@ function viewHeat(rep) {
     ? `<div class="scale-key heat-key" aria-hidden="true"><span>${mode === 'avg' ? rate3(M.lo) : pct(M.lo)}</span><i class="hotcold"></i><span>${mode === 'avg' ? rate3(M.hi) : pct(M.hi)}</span></div>` : '';
   const explain = mode === 'avg' ? 'Batting average on at-bats that ended on a pitch in each spot (balls in play and strike three).'
     : mode === 'hard' ? 'Share of balls in play from each spot that were hit hard.' : '';
-  const typeChips = !rep.typed ? '' : `<div class="chips-row tight">${[['all', 'All pitches'], ...Object.entries(PITCH_TYPES)].map(([k, v]) => `<button class="chipbtn small ${ui.heatType === k ? 'sel' : ''}" data-act="heat-type" data-v="${k}">${v}</button>`).join('')}</div>`;
-  return `<div class="segs">${Object.keys(HEAT_MODES).map(tab).join('')}</div>${typeChips}
+  const typeChips = !rep.typed || lvl() < 3 ? '' : `<div class="chips-row tight">${[['all', 'All pitches'], ...Object.entries(PITCH_TYPES)].map(([k, v]) => `<button class="chipbtn small ${ui.heatType === k ? 'sel' : ''}" data-act="heat-type" data-v="${k}">${v}</button>`).join('')}</div>`;
+  return `<div class="segs">${keys.map(tab).join('')}</div>${typeChips}
     <div class="heat-wrap"><svg class="heat" viewBox="0 0 ${cw * GRID} ${ch * GRID}" role="img" aria-label="Zone heat map, catcher's view">
       ${cells}<rect class="sz" x="${cw}" y="${ch}" width="${cw * 3}" height="${ch * 3}" rx="3"/></svg>${key}</div>
     <p class="hint heat-caption">${caption}</p>
@@ -801,9 +854,11 @@ function viewSettings() {
     : '<button class="btn secondary block" data-act="install-open">Add to home screen</button>';
   return `<main class="page"><header class="top"><h1>Settings</h1></header>
     ${proRow}
-    <h2 class="section">Logging</h2>
-    <label class="toggle"><span><b>Track pitch type</b><small>Adds an optional Fastball / Breaking / Changeup row while logging</small></span>
-      <input type="checkbox" id="pref-ptypes" ${db.prefs.pitchTypes === false ? '' : 'checked'}></label>
+    <h2 class="section">Mode</h2>
+    ${modeSeg()}
+    <p class="hint">Switching never deletes anything. It only changes what you log and what the reports show.</p>
+    ${M().pitchType ? `<label class="toggle"><span><b>Track pitch type</b><small>Adds an optional Fastball / Breaking / Changeup row while logging</small></span>
+      <input type="checkbox" id="pref-ptypes" ${db.prefs.pitchTypes === false ? '' : 'checked'}></label>` : ''}
     <h2 class="section">Your data</h2>
     <p class="muted small">${db.games.length} game${db.games.length === 1 ? '' : 's'} · ${n} pitches, stored only on this phone.</p>
     <button class="btn secondary block" data-act="csv">Export all pitches (CSV)</button>
@@ -846,6 +901,10 @@ document.addEventListener('click', (e) => {
       else ui.sel = { loc, zone: defaultZoneForLoc(loc) };
       buzz(6); render(); break;
     }
+    case 'choose-mode':
+      setMode(el.dataset.v); go('#/new'); break;
+    case 'set-mode':
+      setMode(el.dataset.v); buzz(6); render(); break;
     case 'ptype':
       ui.pitchType = ui.pitchType === el.dataset.v ? null : el.dataset.v;
       buzz(6); render(); break;
@@ -856,7 +915,7 @@ document.addEventListener('click', (e) => {
     case 'result': {
       const r = el.dataset.r;
       if (r === 'IP') {
-        if (!ui.sel.zone) { logPitch('IP'); return; } // shows the "pick a zone" prompt
+        if (M().zone && !ui.sel.zone) { logPitch('IP'); return; } // shows the "pick a zone" prompt
         ui.ip = { contact: null, traj: null, spray: null };
         render();
       } else logPitch(r);
