@@ -1,9 +1,9 @@
 // Offline support: precache the app shell, serve from cache, refresh in background.
 // Bump VERSION whenever you deploy changes so phones pick them up.
-const VERSION = 'atbat-v12';
+const VERSION = 'atbat-v13';
 const ASSETS = [
   './', './index.html', './css/app.css',
-  './js/app.js', './js/stats.js', './js/store.js', './js/field.js', './js/config.js', './js/pro.js', './js/share.js', './privacy.html',
+  './js/app.js', './js/stats.js', './js/store.js', './js/field.js', './js/config.js', './js/pro.js', './js/share.js', './js/usage.js', './js/feedback.js', './privacy.html',
   './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png',
   './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',
 ];

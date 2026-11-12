@@ -22,6 +22,10 @@
 <body>
   <div id="app"><p style="padding:16px">Loading…</p></div>
   <noscript><p style="padding:16px">At-Bat Log needs JavaScript turned on.</p></noscript>
+  <!-- Declares the feedback form for Netlify Forms; the app submits it with fetch. -->
+  <form name="feedback" data-netlify="true" netlify-honeypot="bot-field" hidden>
+    <input name="bot-field"><input name="kind"><textarea name="message"></textarea><input name="email"><input name="context">
+  </form>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>

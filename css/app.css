@@ -486,3 +486,14 @@ body[data-tabs="1"] .toast { top: max(8px, env(safe-area-inset-top)); }
 .welcome.compact h2 { font-size: 1.35rem; margin: 12px 0 6px; }
 .welcome.compact p { font-size: .95rem; }
 .welcome.compact + .label { margin-top: 12px; }
+
+/* ---------- feedback ---------- */
+.fb-row { width: 100%; border: 0; font: inherit; text-align: left; cursor: pointer; margin-bottom: 8px; }
+.fb-form textarea {
+  font: inherit; font-size: 1rem; padding: .7rem .8rem; border-radius: 12px; border: 0; resize: vertical;
+  background: var(--fill); color: var(--text); width: 100%; min-height: 120px;
+}
+.fb-form textarea:focus { outline: 2px solid var(--accent); }
+.fb-form .optrow { margin-bottom: 16px; }
+.fb-form .btn.huge { margin-top: 8px; }
+.sheet-links .link { font: inherit; font-weight: 600; font-size: .95rem; }

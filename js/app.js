@@ -8,6 +8,8 @@ import {
 } from './stats.js';
 import { fieldSVG, pointToField } from './field.js';
 import { renderSummary, shareOrDownload } from './share.js';
+import * as usage from './usage.js';
+import { sendFeedback, flushFeedback, pendingFeedback } from './feedback.js';
 
 let db = store.load();
 let installPrompt = null; // Android/desktop "install app" event
@@ -15,6 +17,7 @@ const ui = {
   sel: { zone: null, loc: null },
   pitchType: null, // optional: FB / BR / CH for the pitch being logged
   heatType: 'all',
+  feedback: null, // { kind, sending } while the feedback sheet is open
   ip: null, // in-play sheet state
   menu: false,
   report: { player: 'all', season: 'all', game: 'all' },
@@ -73,6 +76,7 @@ function backupDue() {
 async function doBackup() {
   const ok = await saveFile(`at-bat-log-backup-${today()}.json`, JSON.stringify(db, null, 1), 'application/json');
   if (!ok) return;
+  usage.track('backup');
   db.prefs.backupGames = loggedGames();
   db.prefs.backupAt = Date.now();
   persist();
@@ -186,6 +190,26 @@ function viewInstallSheet() {
   </div>`;
 }
 
+// ---------- feedback ----------
+const FEEDBACK_KINDS = [['bug', 'Something broke'], ['idea', 'Idea'], ['other', 'Other']];
+function viewFeedbackSheet() {
+  const f = ui.feedback;
+  return `<div class="sheet-bg" data-act="feedback-close"></div>
+  <div class="sheet" role="dialog" aria-label="Send feedback">
+    <div class="sheet-head"><h2>Send feedback</h2><button class="link" data-act="feedback-close">Cancel</button></div>
+    <form id="feedback-form" class="form fb-form">
+      <div class="optrow three">${FEEDBACK_KINDS.map(([k, l]) => `<button type="button" class="opt ${f.kind === k ? 'sel' : ''}" data-act="feedback-kind" data-v="${k}">${l}</button>`).join('')}</div>
+      <label>What's on your mind?<textarea name="message" required maxlength="2000" rows="5" placeholder="${f.kind === 'bug' ? 'What were you doing, and what went wrong?' : 'Anything helps: what you like, what\'s confusing, what\'s missing.'}"></textarea></label>
+      <label>Email <span class="muted">(optional, if you'd like a reply)</span><input name="email" type="email" maxlength="120" autocomplete="email" placeholder="you@example.com"></label>
+      <button class="btn primary huge" type="submit" ${f.sending ? 'disabled' : ''}>${f.sending ? 'Sending…' : 'Send'}</button>
+      <p class="hint center">We also get your app version, mode and phone type, to help fix problems. Never your games or player names.</p>
+    </form>
+  </div>`;
+}
+function feedbackContext() {
+  return [`v${CONFIG.version}`, `mode ${modeId()}`, platform(), isStandalone() ? 'installed' : 'browser', `${window.innerWidth}x${window.innerHeight}`].join(' · ');
+}
+
 // ---------- routing ----------
 function route() {
   const h = location.hash.replace(/^#\/?/, '');
@@ -195,6 +219,7 @@ function route() {
 function go(hash) { location.hash = hash; }
 window.addEventListener('hashchange', () => {
   const next = route().view;
+  ui.feedback = null;
   if (ui.lastView === 'game' && next === 'home' && installOffer() && !db.prefs.installShown) {
     db.prefs.installShown = true; persist(); ui.installSheet = true;
   }
@@ -221,6 +246,7 @@ function render() {
   const tabs = ['home', 'player', 'settings'].includes(r.view);
   if (tabs) html += tabBar(r.view);
   if (ui.installSheet && tabs) html += viewInstallSheet();
+  if (ui.feedback) html += viewFeedbackSheet();
   app.innerHTML = html + `<div id="toast" class="toast ${ui.toast ? 'show' : ''}" role="status" aria-live="polite">${esc(ui.toast || '')}</div>`;
   document.body.dataset.view = r.view;
   ui.lastView = r.view;
@@ -461,7 +487,7 @@ function viewMenu(g, current) {
     </div>
     <p class="hint">“Other” is for a runner out, game over, or a substitution. It isn't counted in the stats.</p>
     ${recent ? `<p class="label">This game</p><ol class="mini-log">${recent}</ol>` : ''}
-    <div class="sheet-links"><a class="link" href="#/edit/${g.id}">Edit game</a></div>
+    <div class="sheet-links"><a class="link" href="#/edit/${g.id}">Edit game</a><button class="link" data-act="feedback-open">Send feedback</button></div>
   </div>`;
 }
 
@@ -495,8 +521,16 @@ function logPitch(result, extra = {}) {
     return false;
   }
   const before = replayGame(g).current.num;
+  const firstPitch = !g.events.some((ev) => ev.type === 'pitch');
   g.events.push({ type: 'pitch', t: Date.now(), zone, loc: m.zone ? ui.sel.loc : null, result, ...(m.pitchType && ui.pitchType ? { pitch: ui.pitchType } : {}), ...extra });
   persist();
+  if (firstPitch) {
+    usage.track('game');
+    const n = loggedGames();
+    if (n === 1) usage.track('first_game');
+    if (n === 3) usage.track('game3');
+    if (n === 10) usage.track('game10');
+  }
   ui.sel = { zone: null, loc: null };
   ui.pitchType = null;
   ui.ip = null;
@@ -706,7 +740,8 @@ async function shareReport() {
   const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
   if (!blob) { showToast('Could not create the image'); return; }
   const slug = (single ? `${single.player}-vs-${single.opponent}-${single.date}` : `${who}-season`).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  await shareOrDownload(blob, `at-bat-log-${slug || 'report'}.png`, CONFIG.appName);
+  const sent = await shareOrDownload(blob, `at-bat-log-${slug || 'report'}.png`, CONFIG.appName);
+  if (sent) usage.track('share');
 }
 
 function viewSplits(sp) {
@@ -854,6 +889,7 @@ function viewSettings() {
     : '<button class="btn secondary block" data-act="install-open">Add to home screen</button>';
   return `<main class="page"><header class="top"><h1>Settings</h1></header>
     ${proRow}
+    <button class="row-link fb-row" data-act="feedback-open"><span><b>Send feedback</b><small>Something broken, confusing or missing? Tell us.</small></span><span class="chev">›</span></button>
     <h2 class="section">Mode</h2>
     ${modeSeg()}
     <p class="hint">Switching never deletes anything. It only changes what you log and what the reports show.</p>
@@ -867,6 +903,8 @@ function viewSettings() {
     <p class="hint">${db.prefs.backupAt ? `Last backup: ${new Date(db.prefs.backupAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}. ` : ''}Save a backup now and then (email it to yourself or keep it in Files). Clearing browser data or removing the app erases the log.</p>
     <h2 class="section">App</h2>
     ${install}
+    <label class="toggle"><span><b>Share anonymous usage counts</b><small>Counts like "the app was opened today" or "a game was started". No games, names or IDs.</small></span>
+      <input type="checkbox" id="pref-usage" ${db.prefs.usage === false ? '' : 'checked'}></label>
     <div class="about"><a class="link" href="privacy.html">Privacy</a>${CONFIG.supportEmail ? `<a class="link" href="mailto:${esc(CONFIG.supportEmail)}">Contact</a>` : ''}<span class="muted">Version ${esc(CONFIG.version)}</span></div>
     <button class="btn danger-link block" data-act="wipe">Erase all data on this phone</button>
   </main>`;
@@ -902,7 +940,17 @@ document.addEventListener('click', (e) => {
       buzz(6); render(); break;
     }
     case 'choose-mode':
-      setMode(el.dataset.v); go('#/new'); break;
+      setMode(el.dataset.v); usage.track(`start_${el.dataset.v}`); go('#/new'); break;
+    case 'feedback-open': ui.menu = false; ui.feedback = { kind: 'other', sending: false }; render(); break;
+    case 'feedback-close': ui.feedback = null; render(); break;
+    case 'feedback-kind': {
+      const msg = document.querySelector('#feedback-form textarea')?.value || '';
+      const email = document.querySelector('#feedback-form input[name=email]')?.value || '';
+      ui.feedback.kind = el.dataset.v; render();
+      document.querySelector('#feedback-form textarea').value = msg;
+      document.querySelector('#feedback-form input[name=email]').value = email;
+      break;
+    }
     case 'set-mode':
       setMode(el.dataset.v); buzz(6); render(); break;
     case 'ptype':
@@ -1011,7 +1059,10 @@ document.addEventListener('click', (e) => {
 
 document.addEventListener('change', (e) => {
   const t = e.target;
-  if (t.id === 'pref-ptypes') {
+  if (t.id === 'pref-usage') {
+    db.prefs.usage = t.checked; persist();
+    if (!t.checked) usage.clearQueue();
+  } else if (t.id === 'pref-ptypes') {
     db.prefs.pitchTypes = t.checked; persist();
   } else if (t.dataset.playerSeason) {
     ui.player.season = t.value; ui.heatPick = null; ui.sprayPick = null; render();
@@ -1031,6 +1082,22 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('submit', (e) => {
+  if (e.target.id === 'feedback-form') {
+    e.preventDefault();
+    if (!ui.feedback || ui.feedback.sending) return;
+    const fd = new FormData(e.target);
+    const message = String(fd.get('message') || '').trim();
+    if (!message) return;
+    ui.feedback.sending = true; render();
+    sendFeedback({ kind: ui.feedback.kind, message, email: String(fd.get('email') || '').trim(), context: feedbackContext() })
+      .then((r) => {
+        ui.feedback = null;
+        usage.track('feedback');
+        showToast(r === 'sent' ? 'Thanks! Your feedback was sent.' : 'Saved. It will send when you\'re back online.', 3500);
+        render();
+      });
+    return;
+  }
   if (e.target.id === 'restore-form') {
     e.preventDefault();
     if (ui.busy) return;
@@ -1079,6 +1146,10 @@ async function boot() {
   }
   render();
   store.requestPersistence();
+  usage.configure({ isEnabled: () => db.prefs.usage !== false });
+  usage.trackOpen(isStandalone());
+  usage.flush();
+  flushFeedback();
   pro.refreshIfDue().then(() => { if (route().view === 'report' || route().view === 'pro') render(); });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('SW registration failed', err));
